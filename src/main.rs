@@ -2,6 +2,8 @@ mod data_loader;
 mod gui;
 mod models;
 mod recommender;
+mod search;
+mod simulation;
 
 use anyhow::{Context, Result};
 use data_loader::{
