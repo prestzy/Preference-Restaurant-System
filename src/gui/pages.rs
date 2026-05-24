@@ -1,4 +1,4 @@
-use super::components::{chip_row, display_list, option_chip, recommendation_card};
+use super::components::{chip_row, option_chip, recommendation_card, selected_dish_pills};
 use super::state::AppState;
 use crate::models::Dish;
 use crate::search::{MatchMode, SearchFilter, filter_dishes};
@@ -133,26 +133,93 @@ fn show_menu_panel(ui: &mut egui::Ui, state: &mut AppState, requested_list_heigh
     }
 }
 
-/// One readable dish card with metadata and a selection button.
+/// One readable dish card with metadata and a clear selection button.
+///
+/// The card uses bold labels for category, ingredients, and tags so viewers can
+/// quickly understand what each line means. The action is styled as a real
+/// button because plain text made the original Select affordance easy to miss.
 fn dish_card(ui: &mut egui::Ui, dish: &Dish, selected: bool) -> bool {
     let mut clicked = false;
 
-    egui::Frame::group(ui.style()).show(ui, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            ui.strong(format!("{} ({})", dish.name, dish.dish_id));
-            ui.label(format!("Category: {}", dish.category));
+    egui::Frame::none()
+        .fill(egui::Color32::WHITE)
+        .stroke(egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgb(226, 232, 240),
+        ))
+        .rounding(8.0)
+        .inner_margin(egui::Margin::symmetric(14.0, 12.0))
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new(&dish.name).strong().size(16.0));
+                ui.monospace(format!("({})", dish.dish_id));
+                ui.add_space(12.0);
+                ui.strong("Category:");
+                ui.label(display_category(&dish.category));
+            });
+
+            ui.add_space(8.0);
+            labelled_metadata(ui, "Ingredients:", &dish.ingredients.join(", "));
+            ui.add_space(4.0);
+            labelled_metadata(ui, "Tags:", &dish.tags.join(", "));
+
+            ui.add_space(10.0);
+            // Clicking the selected state toggles the dish off because
+            // `toggle_dish_selection` already supports select/unselect.
+            if select_dish_button(ui, selected).clicked() {
+                clicked = true;
+            }
         });
 
-        ui.label(format!("Ingredients: {}", dish.ingredients.join(", ")));
-        ui.label(format!("Tags: {}", dish.tags.join(", ")));
-
-        let label = if selected { "Selected" } else { "Select" };
-        if ui.selectable_label(selected, label).clicked() {
-            clicked = true;
-        }
-    });
-
     clicked
+}
+
+/// Draws a prominent Select/Selected button for a dish card.
+///
+/// Before selection it uses a filled accent button labeled "Select Dish". After
+/// selection it switches to a visible selected state so users can clearly see
+/// which dishes are already part of the recommendation input.
+fn select_dish_button(ui: &mut egui::Ui, selected: bool) -> egui::Response {
+    let (label, fill, text_color, stroke) = if selected {
+        (
+            "Selected",
+            egui::Color32::from_rgb(219, 234, 254),
+            egui::Color32::from_rgb(30, 64, 175),
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(37, 99, 235)),
+        )
+    } else {
+        (
+            "Select Dish",
+            egui::Color32::from_rgb(37, 99, 235),
+            egui::Color32::WHITE,
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(37, 99, 235)),
+        )
+    };
+
+    ui.add(
+        egui::Button::new(egui::RichText::new(label).strong().color(text_color))
+            .fill(fill)
+            .stroke(stroke)
+            .rounding(6.0)
+            .min_size(egui::vec2(110.0, 32.0)),
+    )
+}
+
+/// Displays one dish metadata row with a bold label for readability.
+fn labelled_metadata(ui: &mut egui::Ui, label: &str, value: &str) {
+    ui.horizontal_wrapped(|ui| {
+        ui.strong(label);
+        ui.label(value);
+    });
+}
+
+/// Converts the CSV category value into a friendlier display label.
+fn display_category(category: &str) -> String {
+    let mut chars = category.chars();
+    match chars.next() {
+        Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+        None => "-".to_string(),
+    }
 }
 
 /// Combined preference and cart panel.
@@ -160,6 +227,8 @@ fn dish_card(ui: &mut egui::Ui, dish: &Dish, selected: bool) -> bool {
 /// Recommendations intentionally live on the Evaluation page now. Explore stays
 /// focused on choosing menu items and preference inputs, making it less crowded
 /// and easier to scan during a demo.
+/// The right column is scrollable so long option lists stay readable instead of
+/// pushing Selected Dishes out of view.
 fn show_preference_and_cart_panel(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -191,15 +260,23 @@ fn show_preference_panel(ui: &mut egui::Ui, state: &mut AppState, option_list_he
     }
 }
 
-/// Selected dish/cart display kept near preferences on Explore.
+/// Selected dish display kept near preferences on Explore.
+///
+/// This section was renamed from "Selected Dishes / Cart" because it is not a
+/// checkout cart. It shows the dishes selected as recommendation input.
 fn show_cart_panel(ui: &mut egui::Ui, state: &AppState) {
-    ui.heading("Selected Dishes / Cart");
+    ui.heading("Selected Dishes");
     let selected = state.selected_dish_labels();
     ui.add_space(8.0);
-    ui.label(format!("Selected dishes: {}", display_list(&selected)));
-    if !selected.is_empty() {
-        ui.add_space(6.0);
-        chip_row(ui, &selected);
+    if selected.is_empty() {
+        ui.label("No dishes selected yet. Use the Select Dish buttons in the menu.");
+    } else {
+        ui.label(format!(
+            "{} dish(es) selected for recommendation input:",
+            selected.len()
+        ));
+        ui.add_space(8.0);
+        selected_dish_pills(ui, &selected);
     }
 }
 
@@ -315,7 +392,9 @@ fn option_section(
 
 /// Evaluation page with demo metrics.
 pub fn show_evaluation(ui: &mut egui::Ui, state: &AppState) {
-    ui.heading("Evaluation / Recommendation Results");
+    // The page is now primarily for recommendation review, so the shorter title
+    // is clearer than the older "Evaluation / Recommendation Results" label.
+    ui.heading("Recommendation Results");
     ui.label(
         "Review generated recommendations, score breakdowns, and the reasoning behind each result.",
     );

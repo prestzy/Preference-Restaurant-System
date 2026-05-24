@@ -27,7 +27,7 @@ The menu shows dish cards with:
 - Category.
 - Ingredients.
 - Tags.
-- Select button.
+- **Select Dish** button.
 
 ### Search the Menu
 
@@ -62,7 +62,7 @@ Active filter tokens appear below the search field.
 
 ### Select Dishes
 
-Click **Select** on menu cards. Selected dishes are passed directly into the recommendation engine as the current order context.
+Click **Select Dish** on menu cards. Selected dishes appear in the **Selected Dishes** section and are passed directly into the recommendation engine as the current order context.
 
 ### Enter Preferences
 

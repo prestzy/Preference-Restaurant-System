@@ -1,6 +1,11 @@
 use crate::models::RecommendationResult;
 use eframe::egui;
 
+/// Shared colors for selected states and primary actions.
+const ACCENT_BLUE: egui::Color32 = egui::Color32::from_rgb(37, 99, 235);
+const ACCENT_BLUE_LIGHT: egui::Color32 = egui::Color32::from_rgb(219, 234, 254);
+const NEUTRAL_BORDER: egui::Color32 = egui::Color32::from_rgb(226, 232, 240);
+
 /// Displays a list of values as compact chips.
 pub fn chip_row(ui: &mut egui::Ui, values: &[String]) {
     ui.horizontal_wrapped(|ui| {
@@ -16,20 +21,40 @@ pub fn chip_row(ui: &mut egui::Ui, values: &[String]) {
     });
 }
 
+/// Displays selected dishes as larger, prominent pills.
+///
+/// These are not checkout items. They show the dish IDs currently used as
+/// recommendation input, so they need to stand out clearly during a demo.
+pub fn selected_dish_pills(ui: &mut egui::Ui, values: &[String]) {
+    ui.horizontal_wrapped(|ui| {
+        for value in values {
+            egui::Frame::none()
+                .fill(ACCENT_BLUE_LIGHT)
+                .stroke(egui::Stroke::new(1.0, ACCENT_BLUE))
+                .rounding(12.0)
+                .inner_margin(egui::Margin::symmetric(12.0, 8.0))
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(value)
+                            .strong()
+                            .color(egui::Color32::from_rgb(30, 64, 175)),
+                    );
+                });
+        }
+    });
+}
+
 /// Renders one selectable option chip.
 ///
 /// The selected state uses a light accent fill and border so the white theme
 /// remains clean while still making active choices obvious.
 pub fn option_chip(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
     let (fill, stroke) = if selected {
-        (
-            egui::Color32::from_rgb(219, 234, 254),
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(37, 99, 235)),
-        )
+        (ACCENT_BLUE_LIGHT, egui::Stroke::new(1.0, ACCENT_BLUE))
     } else {
         (
             egui::Color32::from_rgb(248, 250, 252),
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(226, 232, 240)),
+            egui::Stroke::new(1.0, NEUTRAL_BORDER),
         )
     };
 
@@ -62,32 +87,48 @@ pub fn recommendation_card(
         });
 
         ui.add_space(4.0);
-        ui.label(format!(
-            "Final hybrid score: {:.2} | Ingredient score: {:.2} | Co-order score: {:.2}",
-            recommendation.final_score,
-            recommendation.ingredient_score,
-            recommendation.co_order_score
-        ));
+        ui.horizontal_wrapped(|ui| {
+            labelled_value(
+                ui,
+                "Final hybrid score:",
+                format!("{:.2}", recommendation.final_score),
+            );
+            ui.label("|");
+            labelled_value(
+                ui,
+                "Ingredient score:",
+                format!("{:.2}", recommendation.ingredient_score),
+            );
+            ui.label("|");
+            labelled_value(
+                ui,
+                "Co-order score:",
+                format!("{:.2}", recommendation.co_order_score),
+            );
+        });
 
         ui.separator();
-        ui.label("Detailed reason:");
+        ui.strong("Detailed reason:");
         ui.label(build_detailed_reason(
             recommendation,
             related_selected_dish_labels,
         ));
-        ui.label(format!("Summary: {}", recommendation.explanation));
+        labelled_value(ui, "Summary:", &recommendation.explanation);
 
         ui.add_space(4.0);
-        ui.label(format!(
-            "Matched liked ingredients: {}",
-            display_list(&recommendation.matched_liked_ingredients)
-        ));
-        ui.label(format!(
-            "Matched preferred tags: {}",
-            display_list(&recommendation.matched_preferred_tags)
-        ));
-        ui.label(format!(
-            "Disliked ingredient check: {}",
+        labelled_value(
+            ui,
+            "Matched liked ingredients:",
+            display_list(&recommendation.matched_liked_ingredients),
+        );
+        labelled_value(
+            ui,
+            "Matched preferred tags:",
+            display_list(&recommendation.matched_preferred_tags),
+        );
+        labelled_value(
+            ui,
+            "Disliked ingredient check:",
             if recommendation.matched_disliked_ingredients.is_empty() {
                 "No disliked ingredients matched; disliked dishes are excluded before ranking."
                     .to_string()
@@ -96,12 +137,24 @@ pub fn recommendation_card(
                     "Matched disliked ingredient(s): {}",
                     recommendation.matched_disliked_ingredients.join(", ")
                 )
-            }
-        ));
-        ui.label(format!(
-            "Co-order influence from selected dish(es): {}",
-            display_list(related_selected_dish_labels)
-        ));
+            },
+        );
+        labelled_value(
+            ui,
+            "Co-order influence from selected dish(es):",
+            display_list(related_selected_dish_labels),
+        );
+    });
+}
+
+/// Displays a bold label followed by a normal value.
+///
+/// Recommendation cards contain several score and reasoning fields. Separating
+/// label styling from value styling makes each topic easier to scan quickly.
+fn labelled_value(ui: &mut egui::Ui, label: &str, value: impl AsRef<str>) {
+    ui.horizontal_wrapped(|ui| {
+        ui.strong(label);
+        ui.label(value.as_ref());
     });
 }
 
@@ -153,9 +206,12 @@ fn build_detailed_reason(
 }
 
 /// Converts a string list into stakeholder-friendly text.
+///
+/// Empty recommendation fields use `-` instead of `(none)` because it is shorter
+/// and reads better in score breakdowns.
 pub fn display_list(values: &[String]) -> String {
     if values.is_empty() {
-        "(none)".to_string()
+        "-".to_string()
     } else {
         values.join(", ")
     }

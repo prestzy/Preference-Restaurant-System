@@ -24,7 +24,16 @@ fn main() -> Result<()> {
     let dishes = load_dishes(DISHES_PATH).context("failed to load dishes.csv")?;
     let orders = load_orders(ORDERS_PATH).context("failed to load orders.csv")?;
 
-    let native_options = eframe::NativeOptions::default();
+    // A larger default window makes the prototype usable immediately during a
+    // demo: the menu, preference panel, and selected dishes can be seen without
+    // the cramped first-launch layout. The minimum size keeps the two-column UI
+    // from collapsing into an unreadable state.
+    let native_options = eframe::NativeOptions {
+        viewport: eframe::egui::ViewportBuilder::default()
+            .with_inner_size([1500.0, 900.0])
+            .with_min_inner_size([1100.0, 720.0]),
+        ..Default::default()
+    };
 
     eframe::run_native(
         "Preference-Driven Restaurant Ordering System",
