@@ -1,7 +1,7 @@
 use crate::models::RecommendationResult;
 use eframe::egui;
 
-/// Displays comma-separated values as compact chips.
+/// Displays a list of values as compact chips.
 pub fn chip_row(ui: &mut egui::Ui, values: &[String]) {
     ui.horizontal_wrapped(|ui| {
         for value in values {
@@ -14,6 +14,32 @@ pub fn chip_row(ui: &mut egui::Ui, values: &[String]) {
                 });
         }
     });
+}
+
+/// Renders one selectable option chip.
+///
+/// The selected state uses a light accent fill and border so the white theme
+/// remains clean while still making active choices obvious.
+pub fn option_chip(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
+    let (fill, stroke) = if selected {
+        (
+            egui::Color32::from_rgb(219, 234, 254),
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(37, 99, 235)),
+        )
+    } else {
+        (
+            egui::Color32::from_rgb(248, 250, 252),
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(226, 232, 240)),
+        )
+    };
+
+    ui.add(
+        egui::Button::new(label)
+            .fill(fill)
+            .stroke(stroke)
+            .rounding(6.0),
+    )
+    .clicked()
 }
 
 /// Renders one recommendation in an explainable score format.
@@ -35,13 +61,6 @@ pub fn recommendation_card(ui: &mut egui::Ui, rank: usize, recommendation: &Reco
         ));
         ui.label(&recommendation.explanation);
     });
-}
-
-/// Shows a labelled text input and returns whether the user changed it.
-pub fn labelled_text_input(ui: &mut egui::Ui, label: &str, hint: &str, value: &mut String) -> bool {
-    ui.label(label);
-    ui.add(egui::TextEdit::singleline(value).hint_text(hint))
-        .changed()
 }
 
 /// Converts a string list into stakeholder-friendly text.

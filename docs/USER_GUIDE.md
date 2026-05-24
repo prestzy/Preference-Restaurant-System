@@ -64,19 +64,19 @@ Active filter tokens appear below the search field.
 
 Click **Select** on menu cards. Selected dishes are passed directly into the recommendation engine as the current order context.
 
-Manual selected dish ID input still exists as a fallback for demos or keyboard-driven testing.
-
 ### Enter Preferences
 
-Preference fields accept comma-separated values:
+Preference options are generated from the loaded menu data.
 
-```text
-Liked ingredients: chicken, rice, egg
-Disliked ingredients: beef, anchovies
-Preferred tags: spicy, signature
-```
+Use the selectable chips under:
 
-Recommendations refresh automatically when preference text or selected dishes change.
+- **Liked Ingredients**
+- **Disliked Ingredients**
+- **Preferred Tags**
+
+The same ingredient cannot stay in both liked and disliked lists. If you select an ingredient as liked, it is removed from disliked. If you select it as disliked, it is removed from liked.
+
+Recommendations refresh automatically when selected preference chips or selected dishes change.
 
 ### Understand Recommendations
 

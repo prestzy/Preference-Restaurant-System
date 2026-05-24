@@ -1,6 +1,7 @@
 mod data_loader;
 mod gui;
 mod models;
+mod preferences;
 mod recommender;
 mod search;
 mod simulation;
@@ -28,7 +29,13 @@ fn main() -> Result<()> {
     eframe::run_native(
         "Preference-Driven Restaurant Ordering System",
         native_options,
-        Box::new(move |_creation_context| Box::new(RestaurantOrderingApp::new(dishes, orders))),
+        Box::new(move |creation_context| {
+            Box::new(RestaurantOrderingApp::new(
+                dishes,
+                orders,
+                &creation_context.egui_ctx,
+            ))
+        }),
     )
     .map_err(|error| anyhow::anyhow!("failed to start GUI: {error}"))?;
 

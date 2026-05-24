@@ -1,8 +1,9 @@
 use crate::data_loader::ORDERS_PATH;
 use crate::models::{Dish, Order, UserPreference};
+use crate::preferences::{PreferenceOptions, extract_preference_options};
 use crate::recommender::hybrid::{RecommendationOutput, generate_recommendations};
 use crate::search::MatchMode;
-use crate::simulation::{add_simulated_order, parse_dish_ids};
+use crate::simulation::add_simulated_order;
 use std::collections::HashSet;
 
 /// Main pages exposed by the application navigation.
@@ -25,10 +26,10 @@ pub struct AppState {
     pub active_page: AppPage,
     pub menu_search: String,
     pub search_match_mode: MatchMode,
-    pub liked_ingredients_input: String,
-    pub disliked_ingredients_input: String,
-    pub preferred_tags_input: String,
-    pub manual_selected_dishes_input: String,
+    pub preference_options: PreferenceOptions,
+    pub selected_liked_ingredients: HashSet<String>,
+    pub selected_disliked_ingredients: HashSet<String>,
+    pub selected_preferred_tags: HashSet<String>,
     pub selected_dish_ids: HashSet<String>,
     pub simulated_order_input: String,
     pub append_simulated_orders_to_csv: bool,
@@ -40,9 +41,7 @@ pub struct AppState {
 impl AppState {
     /// Creates initial state using loaded dishes and orders.
     pub fn new(dishes: Vec<Dish>, orders: Vec<Order>) -> Self {
-        let mut selected_dish_ids = HashSet::new();
-        selected_dish_ids.insert("D01".to_string());
-        selected_dish_ids.insert("D03".to_string());
+        let preference_options = extract_preference_options(&dishes);
 
         let mut state = Self {
             dishes,
@@ -50,11 +49,11 @@ impl AppState {
             active_page: AppPage::ExploreRecommend,
             menu_search: String::new(),
             search_match_mode: MatchMode::Any,
-            liked_ingredients_input: "chicken, rice, egg".to_string(),
-            disliked_ingredients_input: "beef, anchovies".to_string(),
-            preferred_tags_input: "spicy, signature".to_string(),
-            manual_selected_dishes_input: String::new(),
-            selected_dish_ids,
+            preference_options,
+            selected_liked_ingredients: HashSet::new(),
+            selected_disliked_ingredients: HashSet::new(),
+            selected_preferred_tags: HashSet::new(),
+            selected_dish_ids: HashSet::new(),
             simulated_order_input: String::new(),
             append_simulated_orders_to_csv: false,
             recommendation_output: RecommendationOutput::default(),
@@ -66,16 +65,19 @@ impl AppState {
         state
     }
 
-    /// Builds the current recommender input from text fields and selected cards.
+    /// Builds the current recommender input from selected GUI options.
+    ///
+    /// Manual selected dish ID entry was removed from the end-user workflow.
+    /// Dish IDs now come only from menu card Select buttons, which prevents
+    /// typing mistakes and keeps co-ordering input aligned with visible menu
+    /// choices.
     pub fn current_preference(&self) -> UserPreference {
-        let selected_dish_ids = self.combined_selected_dish_ids().join(",");
-
-        UserPreference::from_input_text(
-            &self.liked_ingredients_input,
-            &self.disliked_ingredients_input,
-            &self.preferred_tags_input,
-            &selected_dish_ids,
-        )
+        UserPreference {
+            liked_ingredients: sorted_set_values(&self.selected_liked_ingredients),
+            disliked_ingredients: sorted_set_values(&self.selected_disliked_ingredients),
+            preferred_tags: sorted_set_values(&self.selected_preferred_tags),
+            selected_dish_ids: self.selected_dish_ids(),
+        }
     }
 
     /// Re-runs recommendation generation and increments a version counter.
@@ -86,25 +88,47 @@ impl AppState {
         self.recommendation_version += 1;
     }
 
-    /// Updates preference text fields and refreshes recommendations if changed.
-    pub fn set_preference_inputs(
-        &mut self,
-        liked_ingredients: String,
-        disliked_ingredients: String,
-        preferred_tags: String,
-        manual_selected_dishes: String,
-    ) {
-        if self.liked_ingredients_input != liked_ingredients
-            || self.disliked_ingredients_input != disliked_ingredients
-            || self.preferred_tags_input != preferred_tags
-            || self.manual_selected_dishes_input != manual_selected_dishes
-        {
-            self.liked_ingredients_input = liked_ingredients;
-            self.disliked_ingredients_input = disliked_ingredients;
-            self.preferred_tags_input = preferred_tags;
-            self.manual_selected_dishes_input = manual_selected_dishes;
-            self.refresh_recommendations();
+    /// Toggles one liked ingredient option.
+    ///
+    /// Conflict rule: an ingredient cannot be liked and disliked at the same
+    /// time. Selecting it as liked removes it from disliked preferences.
+    pub fn toggle_liked_ingredient(&mut self, ingredient: &str) {
+        if self.selected_liked_ingredients.contains(ingredient) {
+            self.selected_liked_ingredients.remove(ingredient);
+        } else {
+            self.selected_liked_ingredients
+                .insert(ingredient.to_string());
+            self.selected_disliked_ingredients.remove(ingredient);
         }
+
+        self.refresh_recommendations();
+    }
+
+    /// Toggles one disliked ingredient option.
+    ///
+    /// Conflict rule: selecting an ingredient as disliked removes it from liked
+    /// preferences. This keeps the recommendation input unambiguous.
+    pub fn toggle_disliked_ingredient(&mut self, ingredient: &str) {
+        if self.selected_disliked_ingredients.contains(ingredient) {
+            self.selected_disliked_ingredients.remove(ingredient);
+        } else {
+            self.selected_disliked_ingredients
+                .insert(ingredient.to_string());
+            self.selected_liked_ingredients.remove(ingredient);
+        }
+
+        self.refresh_recommendations();
+    }
+
+    /// Toggles one preferred tag option and refreshes recommendations.
+    pub fn toggle_preferred_tag(&mut self, tag: &str) {
+        if self.selected_preferred_tags.contains(tag) {
+            self.selected_preferred_tags.remove(tag);
+        } else {
+            self.selected_preferred_tags.insert(tag.to_string());
+        }
+
+        self.refresh_recommendations();
     }
 
     /// Toggles menu-card selection and refreshes recommendations immediately.
@@ -118,18 +142,27 @@ impl AppState {
         self.refresh_recommendations();
     }
 
-    /// Returns selected dish IDs from both card selection and manual fallback.
-    pub fn combined_selected_dish_ids(&self) -> Vec<String> {
+    /// Returns selected dish IDs collected from menu Select buttons.
+    ///
+    /// This is the only end-user source of selected dishes. The old manual
+    /// selected-dish ID fallback was removed to keep the normal workflow simpler
+    /// and reduce invalid input.
+    pub fn selected_dish_ids(&self) -> Vec<String> {
         let mut selected = self.selected_dish_ids.iter().cloned().collect::<Vec<_>>();
-
-        for manual_id in parse_dish_ids(&self.manual_selected_dishes_input) {
-            if !selected.contains(&manual_id) {
-                selected.push(manual_id);
-            }
-        }
-
         selected.sort();
         selected
+    }
+
+    /// Returns selected dish names for the cart panel.
+    pub fn selected_dish_labels(&self) -> Vec<String> {
+        let mut labels = self
+            .dishes
+            .iter()
+            .filter(|dish| self.selected_dish_ids.contains(&dish.dish_id))
+            .map(|dish| format!("{} ({})", dish.name, dish.dish_id))
+            .collect::<Vec<_>>();
+        labels.sort();
+        labels
     }
 
     /// Returns all known dish IDs for validation.
@@ -180,6 +213,13 @@ impl AppState {
     }
 }
 
+/// Converts a `HashSet` into a sorted vector for deterministic recommender input.
+fn sorted_set_values(values: &HashSet<String>) -> Vec<String> {
+    let mut values = values.iter().cloned().collect::<Vec<_>>();
+    values.sort();
+    values
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,7 +235,7 @@ mod tests {
     }
 
     #[test]
-    fn preference_change_refreshes_recommendations() {
+    fn preference_selection_refreshes_recommendations() {
         let dishes = vec![
             dish("D01", "Rice", &["rice"]),
             dish("D02", "Chicken", &["chicken"]),
@@ -204,14 +244,22 @@ mod tests {
         let mut state = AppState::new(dishes, orders);
         let before = state.recommendation_version;
 
-        state.set_preference_inputs(
-            "rice".to_string(),
-            state.disliked_ingredients_input.clone(),
-            state.preferred_tags_input.clone(),
-            state.manual_selected_dishes_input.clone(),
-        );
+        state.toggle_liked_ingredient("rice");
 
         assert!(state.recommendation_version > before);
+    }
+
+    #[test]
+    fn ingredient_cannot_be_liked_and_disliked_at_same_time() {
+        let dishes = vec![dish("D01", "Rice", &["rice"])];
+        let orders = Vec::new();
+        let mut state = AppState::new(dishes, orders);
+
+        state.toggle_liked_ingredient("rice");
+        state.toggle_disliked_ingredient("rice");
+
+        assert!(!state.selected_liked_ingredients.contains("rice"));
+        assert!(state.selected_disliked_ingredients.contains("rice"));
     }
 
     #[test]
@@ -222,7 +270,6 @@ mod tests {
         ];
         let orders = Vec::new();
         let mut state = AppState::new(dishes, orders);
-        state.selected_dish_ids.clear();
 
         state.toggle_dish_selection("D02");
         let preference = state.current_preference();

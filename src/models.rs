@@ -65,24 +65,6 @@ pub struct UserPreference {
 }
 
 impl UserPreference {
-    /// Builds a clean preference object from comma-separated GUI text fields.
-    ///
-    /// This mirrors the CSV cleaning rules: text preferences become lowercase
-    /// terms, while selected dish IDs become uppercase IDs such as `D01`.
-    pub fn from_input_text(
-        liked_ingredients: &str,
-        disliked_ingredients: &str,
-        preferred_tags: &str,
-        selected_dish_ids: &str,
-    ) -> Self {
-        Self {
-            liked_ingredients: split_lowercase_terms(liked_ingredients),
-            disliked_ingredients: split_lowercase_terms(disliked_ingredients),
-            preferred_tags: split_lowercase_terms(preferred_tags),
-            selected_dish_ids: split_uppercase_ids(selected_dish_ids),
-        }
-    }
-
     /// Returns true when the user entered content-based preferences.
     ///
     /// The hybrid recommender uses this to decide whether it should give more
@@ -114,28 +96,4 @@ pub struct RecommendationResult {
     pub co_order_score: f32,
     pub final_score: f32,
     pub explanation: String,
-}
-
-/// Splits comma-separated text into lowercase, trimmed values.
-///
-/// This helper is used for GUI input. CSV input uses a public helper in
-/// `data_loader.rs` so the required module API remains clear.
-fn split_lowercase_terms(value: &str) -> Vec<String> {
-    value
-        .split(',')
-        .map(|item| item.trim().to_lowercase())
-        .filter(|item| !item.is_empty())
-        .collect()
-}
-
-/// Splits comma-separated text into uppercase dish IDs.
-///
-/// Uppercasing allows users to type `d01` or `D01` while the rest of the system
-/// still works with one consistent dish ID format.
-fn split_uppercase_ids(value: &str) -> Vec<String> {
-    value
-        .split(',')
-        .map(|item| item.trim().to_uppercase())
-        .filter(|item| !item.is_empty())
-        .collect()
 }

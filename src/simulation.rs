@@ -59,7 +59,7 @@ pub fn add_simulated_order(
     })
 }
 
-/// Parses manually entered dish IDs for simulation and fallback selection.
+/// Parses manually entered dish IDs for the admin/demo simulation tool.
 pub fn parse_dish_ids(raw_dish_ids: &str) -> Vec<String> {
     raw_dish_ids
         .split([',', ';', '|', '\n', '\r', '\t', ' '])

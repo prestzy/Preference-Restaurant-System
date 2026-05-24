@@ -83,11 +83,22 @@ Menu filtering service:
 
 This is separate from UI code so it can be tested directly.
 
+### `preferences.rs`
+
+Selectable preference option extraction:
+
+- Extracts all unique ingredients from loaded dishes.
+- Extracts all unique tags from loaded dishes.
+- Normalizes options by trimming and lowercasing.
+- Sorts options alphabetically for predictable GUI display.
+
+This keeps preference option generation outside rendering code.
+
 ### `simulation.rs`
 
 Admin/demo order simulation:
 
-- Parses manually entered dish IDs.
+- Parses manually entered dish IDs for the admin/demo simulation tool.
 - Validates them against known menu IDs.
 - Adds a simulated order to in-memory order history.
 - Optionally appends the order to `data/orders.csv`.

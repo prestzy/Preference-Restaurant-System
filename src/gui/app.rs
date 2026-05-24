@@ -13,7 +13,9 @@ pub struct RestaurantOrderingApp {
 
 impl RestaurantOrderingApp {
     /// Creates the GUI after CSV data has been loaded in `main.rs`.
-    pub fn new(dishes: Vec<Dish>, orders: Vec<Order>) -> Self {
+    pub fn new(dishes: Vec<Dish>, orders: Vec<Order>, ctx: &egui::Context) -> Self {
+        apply_white_theme(ctx);
+
         Self {
             state: AppState::new(dishes, orders),
         }
@@ -54,21 +56,57 @@ impl RestaurantOrderingApp {
     }
 }
 
+/// Applies a clean white restaurant-ordering theme to egui.
+///
+/// `Visuals::light` gives the app a white/light-gray base. The overrides keep
+/// cards and panels bright, text dark, and selected controls visible with a
+/// restrained blue accent.
+fn apply_white_theme(ctx: &egui::Context) {
+    let mut visuals = egui::Visuals::light();
+    visuals.panel_fill = egui::Color32::from_rgb(248, 250, 252);
+    visuals.window_fill = egui::Color32::WHITE;
+    visuals.extreme_bg_color = egui::Color32::from_rgb(241, 245, 249);
+    visuals.selection.bg_fill = egui::Color32::from_rgb(219, 234, 254);
+    visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(37, 99, 235));
+    visuals.widgets.inactive.bg_fill = egui::Color32::WHITE;
+    visuals.widgets.inactive.bg_stroke =
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(226, 232, 240));
+    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(239, 246, 255);
+    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(219, 234, 254);
+    ctx.set_visuals(visuals);
+
+    let mut style = (*ctx.style()).clone();
+    style.spacing.item_spacing = egui::vec2(8.0, 8.0);
+    style.spacing.button_padding = egui::vec2(10.0, 6.0);
+    ctx.set_style(style);
+}
+
 impl eframe::App for RestaurantOrderingApp {
     /// Main egui frame update.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.show_navigation(ctx);
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            let active_page = self.state.active_page;
             let available_width = ui.available_width();
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| match self.state.active_page {
-                    AppPage::Dashboard => show_dashboard(ui, &self.state),
-                    AppPage::ExploreRecommend => show_explore(ui, &mut self.state, available_width),
-                    AppPage::Evaluation => show_evaluation(ui, &self.state),
-                    AppPage::AdminDemoTools => show_admin_demo_tools(ui, &mut self.state),
-                });
+
+            match active_page {
+                // Explore has its own internal scroll regions for menu,
+                // preferences, and recommendations. Avoiding a page-level
+                // scroll area lets the menu panel fill the bottom of the
+                // window instead of leaving unused vertical space.
+                AppPage::ExploreRecommend => show_explore(ui, &mut self.state, available_width),
+                _ => {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| match active_page {
+                            AppPage::ExploreRecommend => unreachable!(),
+                            AppPage::Dashboard => show_dashboard(ui, &self.state),
+                            AppPage::Evaluation => show_evaluation(ui, &self.state),
+                            AppPage::AdminDemoTools => show_admin_demo_tools(ui, &mut self.state),
+                        });
+                }
+            };
         });
     }
 }
