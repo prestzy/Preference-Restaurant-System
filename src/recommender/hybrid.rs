@@ -4,6 +4,7 @@ use crate::recommender::collaborative_filter::{
 };
 use crate::recommender::ingredient_filter::{
     build_ingredient_explanation, calculate_ingredient_score, check_disliked_ingredients,
+    matched_disliked_ingredients, matched_liked_ingredients, matched_preferred_tags,
 };
 use std::collections::HashSet;
 
@@ -84,11 +85,24 @@ pub fn generate_recommendations(
             continue;
         }
 
+        let matched_liked_ingredients = matched_liked_ingredients(dish, preference);
+        let matched_preferred_tags = matched_preferred_tags(dish, preference);
+        let matched_disliked_ingredients = matched_disliked_ingredients(dish, preference);
+        let related_selected_dish_ids = related_selected_dishes(
+            &co_order_matrix,
+            &preference.selected_dish_ids,
+            &dish.dish_id,
+        );
+
         recommendations.push(RecommendationResult {
             dish: dish.clone(),
             ingredient_score,
             co_order_score,
             final_score,
+            matched_liked_ingredients,
+            matched_preferred_tags,
+            matched_disliked_ingredients,
+            related_selected_dish_ids,
             explanation: build_hybrid_explanation(
                 dish,
                 preference,

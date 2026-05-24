@@ -32,7 +32,7 @@ There you can:
 - Search by multiple terms.
 - Select dishes directly from the menu cards.
 - Select liked ingredients, disliked ingredients, and preferred tags from generated options.
-- See recommendations update automatically.
+- Open Evaluation to see updated recommendations and reasoning.
 
 On wider windows the menu and recommendation panels appear side by side. On narrower windows the same sections stack vertically.
 

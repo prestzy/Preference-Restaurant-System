@@ -95,5 +95,9 @@ pub struct RecommendationResult {
     pub ingredient_score: f32,
     pub co_order_score: f32,
     pub final_score: f32,
+    pub matched_liked_ingredients: Vec<String>,
+    pub matched_preferred_tags: Vec<String>,
+    pub matched_disliked_ingredients: Vec<String>,
+    pub related_selected_dish_ids: Vec<String>,
     pub explanation: String,
 }

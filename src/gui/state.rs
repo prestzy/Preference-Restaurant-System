@@ -165,6 +165,22 @@ impl AppState {
         labels
     }
 
+    /// Converts dish IDs into `Name (ID)` labels for explanation text.
+    pub fn dish_labels_for_ids(&self, dish_ids: &[String]) -> Vec<String> {
+        let mut labels = dish_ids
+            .iter()
+            .map(|dish_id| {
+                self.dishes
+                    .iter()
+                    .find(|dish| &dish.dish_id == dish_id)
+                    .map(|dish| format!("{} ({})", dish.name, dish.dish_id))
+                    .unwrap_or_else(|| dish_id.clone())
+            })
+            .collect::<Vec<_>>();
+        labels.sort();
+        labels
+    }
+
     /// Returns all known dish IDs for validation.
     pub fn known_dish_ids(&self) -> HashSet<String> {
         self.dishes

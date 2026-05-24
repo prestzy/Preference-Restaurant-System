@@ -59,7 +59,7 @@ Recommendation orchestration:
 - Applies disliked ingredient exclusion.
 - Calculates ingredient and co-order scores.
 - Combines them into a hybrid score.
-- Produces recommendation explanations and simple evaluation stats.
+- Stores matched liked ingredients, matched preferred tags, related selected dish IDs, and simple evaluation stats for transparent Evaluation-page explanations.
 
 Default hybrid formula:
 
@@ -117,11 +117,12 @@ GUI modules:
 
 ## Responsive Layout
 
-The main workflow is **Explore & Recommend**.
+The main input workflow is **Explore & Recommend**.
 
-- Wide windows show menu browsing beside preference and recommendation panels.
+- Wide windows show menu browsing beside preference and cart panels.
 - Narrow windows stack the same panels vertically.
 - Scroll areas prevent the interface from overflowing on common laptop resolutions such as 1366x768.
+- Recommendation results are shown on **Evaluation** so input collection and output analysis stay visually separate.
 
 The layout uses a small threshold only to decide whether to split into columns. The content itself uses flexible egui sizing and scroll areas.
 

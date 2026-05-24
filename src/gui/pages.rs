@@ -7,7 +7,6 @@ use eframe::egui;
 /// Width at which the Explore page moves from stacked sections to side-by-side panels.
 const WIDE_LAYOUT_THRESHOLD: f32 = 980.0;
 const NARROW_MENU_HEIGHT: f32 = 420.0;
-const NARROW_RECOMMENDATION_HEIGHT: f32 = 360.0;
 const NARROW_OPTION_LIST_HEIGHT: f32 = 120.0;
 
 /// Dashboard with the prototype purpose and loaded data counts.
@@ -22,7 +21,7 @@ pub fn show_dashboard(ui: &mut egui::Ui, state: &AppState) {
         "This Rust desktop prototype recommends dishes for one restaurant by combining explicit food preferences with historical co-order patterns.",
     );
     ui.label(
-        "The main workflow is in Explore & Recommend, where menu browsing, preference entry, dish selection, and recommendation output stay visible together.",
+        "Explore & Recommend collects menu selections and preferences, while Evaluation shows the generated recommendation output and reasoning.",
     );
 }
 
@@ -34,15 +33,23 @@ pub fn show_dashboard(ui: &mut egui::Ui, state: &AppState) {
 pub fn show_explore(ui: &mut egui::Ui, state: &mut AppState, available_width: f32) {
     ui.heading("Explore & Recommend");
     ui.label("Browse dishes, select what the customer is considering, and watch recommendations update automatically.");
+    ui.add_space(8.0);
     ui.separator();
+    ui.add_space(8.0);
 
     if available_width >= WIDE_LAYOUT_THRESHOLD {
         let content_height = ui.available_height().max(360.0);
-        let option_list_height = (content_height * 0.13).clamp(84.0, 120.0);
+        let option_list_height = (content_height * 0.16).clamp(96.0, 140.0);
 
         ui.columns(2, |columns| {
             show_menu_panel(&mut columns[0], state, None);
-            show_preference_and_results_panel(&mut columns[1], state, option_list_height, None);
+            egui::ScrollArea::vertical()
+                .id_source("preference_cart_scroll")
+                .max_height(content_height)
+                .auto_shrink([false, false])
+                .show(&mut columns[1], |ui| {
+                    show_preference_and_cart_panel(ui, state, option_list_height);
+                });
         });
     } else {
         // On narrow windows the panels stack vertically. This wrapper scrolls
@@ -51,13 +58,9 @@ pub fn show_explore(ui: &mut egui::Ui, state: &mut AppState, available_width: f3
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                show_preference_and_results_panel(
-                    ui,
-                    state,
-                    NARROW_OPTION_LIST_HEIGHT,
-                    Some(NARROW_RECOMMENDATION_HEIGHT),
-                );
+                show_preference_and_cart_panel(ui, state, NARROW_OPTION_LIST_HEIGHT);
                 ui.separator();
+                ui.add_space(10.0);
                 show_menu_panel(ui, state, Some(NARROW_MENU_HEIGHT));
             });
     }
@@ -67,6 +70,7 @@ pub fn show_explore(ui: &mut egui::Ui, state: &mut AppState, available_width: f3
 fn show_menu_panel(ui: &mut egui::Ui, state: &mut AppState, requested_list_height: Option<f32>) {
     ui.heading("Menu");
     ui.label("Search by name, ID, category, ingredient, or tag.");
+    ui.add_space(6.0);
 
     let filter_changed = ui
         .add(
@@ -151,22 +155,28 @@ fn dish_card(ui: &mut egui::Ui, dish: &Dish, selected: bool) -> bool {
     clicked
 }
 
-/// Combined preference input and recommendation output panel.
-fn show_preference_and_results_panel(
+/// Combined preference and cart panel.
+///
+/// Recommendations intentionally live on the Evaluation page now. Explore stays
+/// focused on choosing menu items and preference inputs, making it less crowded
+/// and easier to scan during a demo.
+fn show_preference_and_cart_panel(
     ui: &mut egui::Ui,
     state: &mut AppState,
     option_list_height: f32,
-    requested_recommendation_height: Option<f32>,
 ) {
     show_preference_panel(ui, state, option_list_height);
+    ui.add_space(16.0);
     ui.separator();
-    show_recommendation_panel(ui, state, requested_recommendation_height);
+    ui.add_space(12.0);
+    show_cart_panel(ui, state);
 }
 
 /// Preference input panel.
 fn show_preference_panel(ui: &mut egui::Ui, state: &mut AppState, option_list_height: f32) {
     ui.heading("Preference Panel");
     ui.label("Choose from ingredients and tags found in dishes.csv. Recommendations update automatically.");
+    ui.add_space(12.0);
 
     if let Some(action) = preference_option_sections(ui, state, option_list_height) {
         match action {
@@ -179,13 +189,16 @@ fn show_preference_panel(ui: &mut egui::Ui, state: &mut AppState, option_list_he
             PreferenceAction::PreferredTag(tag) => state.toggle_preferred_tag(&tag),
         }
     }
+}
 
-    ui.separator();
+/// Selected dish/cart display kept near preferences on Explore.
+fn show_cart_panel(ui: &mut egui::Ui, state: &AppState) {
     ui.heading("Selected Dishes / Cart");
     let selected = state.selected_dish_labels();
-    ui.add_space(6.0);
+    ui.add_space(8.0);
     ui.label(format!("Selected dishes: {}", display_list(&selected)));
     if !selected.is_empty() {
+        ui.add_space(6.0);
         chip_row(ui, &selected);
     }
 }
@@ -221,7 +234,7 @@ fn preference_option_sections(
         action = Some(clicked_action);
     }
 
-    ui.add_space(10.0);
+    ui.add_space(14.0);
     if let Some(clicked_action) = option_section(
         ui,
         "Disliked Ingredients",
@@ -234,7 +247,7 @@ fn preference_option_sections(
         action = Some(clicked_action);
     }
 
-    ui.add_space(10.0);
+    ui.add_space(14.0);
     if let Some(clicked_action) = option_section(
         ui,
         "Preferred Tags",
@@ -250,11 +263,15 @@ fn preference_option_sections(
     action
 }
 
-/// Renders one bounded scrollable option list.
+/// Renders one bounded scrollable option list inside a card.
 ///
 /// Each preference group can contain many values from `dishes.csv`. Giving every
 /// group its own scroll area keeps liked ingredients, disliked ingredients, and
 /// preferred tags readable without pushing the recommendations off-screen.
+///
+/// The card boundary makes the three preference concepts visually distinct:
+/// liked ingredients increase content score, disliked ingredients exclude
+/// dishes, and preferred tags add a smaller bonus.
 fn option_section(
     ui: &mut egui::Ui,
     title: &str,
@@ -266,61 +283,51 @@ fn option_section(
 ) -> Option<PreferenceAction> {
     let mut action = None;
 
-    ui.strong(title);
-    ui.label(description);
-    egui::ScrollArea::vertical()
-        .id_source(format!("option-list-{title}"))
-        .max_height(list_height)
-        .auto_shrink([false, false])
+    egui::Frame::none()
+        .fill(egui::Color32::WHITE)
+        .stroke(egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgb(226, 232, 240),
+        ))
+        .rounding(8.0)
+        .inner_margin(egui::Margin::symmetric(14.0, 12.0))
         .show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                for option in options {
-                    if option_chip(ui, option, is_selected(option)) {
-                        action = Some(to_action(option));
-                    }
-                }
-            });
+            ui.strong(title);
+            ui.label(description);
+            ui.add_space(8.0);
+            egui::ScrollArea::vertical()
+                .id_source(format!("option-list-{title}"))
+                .max_height(list_height)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for option in options {
+                            if option_chip(ui, option, is_selected(option)) {
+                                action = Some(to_action(option));
+                            }
+                        }
+                    });
+                });
         });
 
     action
 }
 
-/// Recommendation output displayed close to preferences and menu items.
-fn show_recommendation_panel(ui: &mut egui::Ui, state: &AppState, requested_height: Option<f32>) {
-    ui.heading("Recommendations");
-    ui.label("Hybrid score = ingredient preference evidence + co-order evidence.");
-
-    if state.recommendation_output.recommendations.is_empty() {
-        ui.label("No recommendations yet. Enter preferences or select dishes from the menu.");
-        return;
-    }
-
-    let recommendation_height =
-        requested_height.unwrap_or_else(|| ui.available_height().max(180.0));
-
-    egui::ScrollArea::vertical()
-        .id_source("recommendation_scroll")
-        .max_height(recommendation_height)
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            for (rank, recommendation) in state
-                .recommendation_output
-                .recommendations
-                .iter()
-                .take(8)
-                .enumerate()
-            {
-                recommendation_card(ui, rank + 1, recommendation);
-                ui.add_space(8.0);
-            }
-        });
-}
-
 /// Evaluation page with demo metrics.
 pub fn show_evaluation(ui: &mut egui::Ui, state: &AppState) {
-    ui.heading("Evaluation / Prototype Testing");
-    ui.label("Simple demonstration metrics for the current Explore & Recommend state.");
+    ui.heading("Evaluation / Recommendation Results");
+    ui.label(
+        "Review generated recommendations, score breakdowns, and the reasoning behind each result.",
+    );
     ui.separator();
+    ui.add_space(8.0);
+
+    show_recommendation_results(ui, state);
+
+    ui.add_space(16.0);
+    ui.separator();
+    ui.add_space(8.0);
+    ui.heading("Prototype Testing Summary");
 
     let stats = &state.recommendation_output.stats;
     ui.label(format!(
@@ -343,18 +350,34 @@ pub fn show_evaluation(ui: &mut egui::Ui, state: &AppState) {
         "Category diversity count in top 5: {}",
         stats.diversity_count_top_5
     ));
+}
 
-    ui.separator();
-    ui.strong("Top 5 recommendations");
+/// Recommendation output moved to Evaluation.
+///
+/// Keeping this section here separates the input workflow from output analysis:
+/// Explore is for selecting menu/preferences, while Evaluation explains the
+/// generated results and how each score was produced.
+fn show_recommendation_results(ui: &mut egui::Ui, state: &AppState) {
+    ui.heading("Recommendation Results");
+    ui.label("Each card shows the hybrid score plus the ingredient and co-order evidence used to rank the dish.");
+
+    if state.recommendation_output.recommendations.is_empty() {
+        ui.label(
+            "No recommendations yet. Select preferences or cart items on Explore & Recommend.",
+        );
+        return;
+    }
+
     for (rank, recommendation) in state
         .recommendation_output
         .recommendations
         .iter()
-        .take(5)
+        .take(10)
         .enumerate()
     {
-        recommendation_card(ui, rank + 1, recommendation);
-        ui.add_space(8.0);
+        let related_labels = state.dish_labels_for_ids(&recommendation.related_selected_dish_ids);
+        recommendation_card(ui, rank + 1, recommendation, &related_labels);
+        ui.add_space(12.0);
     }
 }
 
@@ -396,18 +419,43 @@ pub fn show_admin_demo_tools(ui: &mut egui::Ui, state: &mut AppState) {
 
     ui.separator();
     ui.strong("Most recent orders in memory");
+    ui.add_space(6.0);
+    show_recent_orders_table(ui, state);
+}
+
+/// Displays recent orders as an aligned table.
+///
+/// The ordered-dishes column is given a stable width and wraps long dish ID
+/// lists. This prevents long simulated orders from shifting later columns or
+/// breaking row alignment.
+fn show_recent_orders_table(ui: &mut egui::Ui, state: &AppState) {
+    let dishes_column_width = (ui.available_width() * 0.48).clamp(220.0, 560.0);
+
     egui::ScrollArea::vertical()
         .max_height(260.0)
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            for order in state.orders.iter().rev().take(10) {
-                ui.label(format!(
-                    "{} | {} | {} | {}",
-                    order.order_id,
-                    order.session_user_id,
-                    order.ordered_dishes.join(", "),
-                    order.timestamp
-                ));
-            }
+            egui::Grid::new("recent_orders_grid")
+                .striped(true)
+                .num_columns(4)
+                .spacing([12.0, 8.0])
+                .show(ui, |ui| {
+                    ui.strong("Order ID");
+                    ui.strong("Session/User ID");
+                    ui.strong("Ordered Dishes");
+                    ui.strong("Timestamp");
+                    ui.end_row();
+
+                    for order in state.orders.iter().rev().take(10) {
+                        ui.monospace(&order.order_id);
+                        ui.monospace(&order.session_user_id);
+                        ui.add_sized(
+                            [dishes_column_width, 18.0],
+                            egui::Label::new(order.ordered_dishes.join(", ")).wrap(true),
+                        );
+                        ui.label(&order.timestamp);
+                        ui.end_row();
+                    }
+                });
         });
 }

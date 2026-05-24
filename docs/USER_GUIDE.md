@@ -78,14 +78,20 @@ The same ingredient cannot stay in both liked and disliked lists. If you select 
 
 Recommendations refresh automatically when selected preference chips or selected dishes change.
 
-### Understand Recommendations
+### View Recommendations
 
-Each recommendation shows:
+Recommendation results are shown on the **Evaluation** page, not on Explore & Recommend. This keeps Explore focused on menu browsing, preference selection, and the cart.
+
+Each recommendation card shows:
 
 - Dish name and ID.
 - Ingredient score.
 - Co-order score.
 - Final hybrid score.
+- Matched liked ingredients.
+- Matched preferred tags.
+- Disliked ingredient exclusion status.
+- Selected cart dish that influenced the co-order score.
 - Plain-language explanation.
 
 Example:
@@ -96,8 +102,9 @@ Recommended because it contains preferred ingredient(s): chicken and often order
 
 ## Evaluation
 
-The Evaluation page shows lightweight prototype testing values:
+The Evaluation page shows recommendation output and lightweight prototype testing values:
 
+- Recommendation cards with detailed score explanations.
 - Number of available recommendations.
 - Dishes evaluated after filtering.
 - Dishes excluded due to disliked ingredients.

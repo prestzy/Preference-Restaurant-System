@@ -34,7 +34,7 @@ Stakeholders can:
 2. Search by dish, ingredient, tag, category, or ID.
 3. Select dishes from menu cards.
 4. Enter preferences.
-5. View updated recommendations immediately.
+5. Open Evaluation to view updated recommendations and score explanations.
 
 The previous separated flow has been merged into one practical workflow so users do not need to jump between menu, preferences, and recommendation pages.
 

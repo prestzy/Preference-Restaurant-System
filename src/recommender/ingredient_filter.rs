@@ -7,11 +7,7 @@ use std::collections::HashSet;
 /// This keeps the recommendation behaviour easy to explain during an FYP demo:
 /// if the user says "beef", beef dishes are removed before ranking.
 pub fn check_disliked_ingredients(dish: &Dish, preference: &UserPreference) -> bool {
-    preference.disliked_ingredients.iter().any(|disliked| {
-        dish.ingredients
-            .iter()
-            .any(|ingredient| term_matches(ingredient, disliked))
-    })
+    !matched_disliked_ingredients(dish, preference).is_empty()
 }
 
 /// Calculates the ingredient-based filtering score for one dish.
@@ -45,7 +41,10 @@ pub fn calculate_ingredient_score(dish: &Dish, preference: &UserPreference) -> f
 /// prototype.
 pub fn build_ingredient_explanation(dish: &Dish, preference: &UserPreference) -> String {
     if check_disliked_ingredients(dish, preference) {
-        return "Excluded because it contains a disliked ingredient.".to_string();
+        return format!(
+            "excluded because it contains disliked ingredient(s): {}",
+            matched_disliked_ingredients(dish, preference).join(", ")
+        );
     }
 
     let matched_ingredients = matched_liked_ingredients(dish, preference);
@@ -76,7 +75,7 @@ pub fn build_ingredient_explanation(dish: &Dish, preference: &UserPreference) ->
 /// Returns the liked ingredients that match a dish.
 ///
 /// A `HashSet` removes duplicates so the same user term is only explained once.
-fn matched_liked_ingredients(dish: &Dish, preference: &UserPreference) -> Vec<String> {
+pub fn matched_liked_ingredients(dish: &Dish, preference: &UserPreference) -> Vec<String> {
     let mut matches = HashSet::new();
 
     for liked in &preference.liked_ingredients {
@@ -93,12 +92,33 @@ fn matched_liked_ingredients(dish: &Dish, preference: &UserPreference) -> Vec<St
 }
 
 /// Returns the preferred tags that match a dish.
-fn matched_preferred_tags(dish: &Dish, preference: &UserPreference) -> Vec<String> {
+pub fn matched_preferred_tags(dish: &Dish, preference: &UserPreference) -> Vec<String> {
     let mut matches = HashSet::new();
 
     for preferred_tag in &preference.preferred_tags {
         if dish.tags.iter().any(|tag| term_matches(tag, preferred_tag)) {
             matches.insert(preferred_tag.clone());
+        }
+    }
+
+    sorted_values(matches)
+}
+
+/// Returns disliked ingredients that match a dish.
+///
+/// Recommended dishes should normally have an empty result here because the
+/// hybrid recommender excludes disliked dishes before ranking. Keeping this as
+/// a public helper lets the Evaluation page explain that exclusion explicitly.
+pub fn matched_disliked_ingredients(dish: &Dish, preference: &UserPreference) -> Vec<String> {
+    let mut matches = HashSet::new();
+
+    for disliked in &preference.disliked_ingredients {
+        if dish
+            .ingredients
+            .iter()
+            .any(|ingredient| term_matches(ingredient, disliked))
+        {
+            matches.insert(disliked.clone());
         }
     }
 
