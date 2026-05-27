@@ -22,6 +22,7 @@ This is the main user workflow.
 
 The menu shows dish cards with:
 
+- Dish image or `No image` placeholder.
 - Dish ID.
 - Dish name.
 - Category.
@@ -84,6 +85,7 @@ Recommendation results are shown on the **Evaluation** page, not on Explore & Re
 
 Each recommendation card shows:
 
+- Dish image or `No image` placeholder.
 - Dish name and ID.
 - Ingredient score.
 - Co-order score.
@@ -91,7 +93,7 @@ Each recommendation card shows:
 - Matched liked ingredients.
 - Matched preferred tags.
 - Disliked ingredient exclusion status.
-- Selected cart dish that influenced the co-order score.
+- Selected dish that influenced the co-order score.
 - Plain-language explanation.
 
 Example:
@@ -112,6 +114,37 @@ The Evaluation page shows recommendation output and lightweight prototype testin
 - Category diversity count in the top 5 recommendations.
 
 These are demo support metrics, not a full academic recommender-system evaluation.
+
+## Dish Images
+
+Dish thumbnails are optional. They are shown only in:
+
+- Explore & Recommend menu dish cards.
+- Evaluation recommendation result cards.
+
+To add an image, place a local file in:
+
+```text
+assets/dishes/
+```
+
+Use the dish ID as the filename when possible:
+
+```text
+assets/dishes/D01.jpg
+assets/dishes/D01.png
+assets/dishes/D01.jpeg
+```
+
+If you add a custom path in an optional `image_path` column in `data/dishes.csv`,
+the app will try that first. If no image is found, it shows `No image` and the
+prototype continues normally.
+
+Record the image source and license in:
+
+```text
+assets/dish_image_sources.csv
+```
 
 ## Admin / Demo Tools
 

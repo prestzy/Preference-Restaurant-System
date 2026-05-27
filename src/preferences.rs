@@ -65,6 +65,8 @@ mod tests {
                 ingredients: vec!["Rice".to_string(), " chicken ".to_string()],
                 category: "main".to_string(),
                 tags: vec!["Spicy".to_string()],
+                image_path: None,
+                image_source_url: None,
             },
             Dish {
                 dish_id: "D02".to_string(),
@@ -72,6 +74,8 @@ mod tests {
                 ingredients: vec!["rice".to_string(), "egg".to_string()],
                 category: "main".to_string(),
                 tags: vec!["signature".to_string(), "spicy".to_string()],
+                image_path: None,
+                image_source_url: None,
             },
         ];
 

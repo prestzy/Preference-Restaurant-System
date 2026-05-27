@@ -121,6 +121,8 @@ mod tests {
             ingredients: vec!["rice".to_string(), "coconut milk".to_string()],
             category: "main".to_string(),
             tags: vec!["spicy".to_string(), "signature".to_string()],
+            image_path: None,
+            image_source_url: None,
         }
     }
 

@@ -1,5 +1,8 @@
-use super::components::{chip_row, option_chip, recommendation_card, selected_dish_pills};
+use super::components::{
+    chip_row, dish_thumbnail, option_chip, recommendation_card, selected_dish_pills,
+};
 use super::state::AppState;
+use crate::image_loader::DishImageCache;
 use crate::models::Dish;
 use crate::search::{MatchMode, SearchFilter, filter_dishes};
 use eframe::egui;
@@ -27,10 +30,15 @@ pub fn show_dashboard(ui: &mut egui::Ui, state: &AppState) {
 
 /// Main end-user workflow.
 ///
-/// On wide windows this shows menu browsing beside preferences and results. On
-/// narrow windows the same sections stack vertically so the UI remains readable
-/// on laptop resolutions.
-pub fn show_explore(ui: &mut egui::Ui, state: &mut AppState, available_width: f32) {
+/// On wide windows this shows menu browsing beside preferences and selected
+/// dishes. On narrow windows the same sections stack vertically so the UI
+/// remains readable on laptop resolutions.
+pub fn show_explore(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    image_cache: &mut DishImageCache,
+    available_width: f32,
+) {
     ui.heading("Explore & Recommend");
     ui.label("Browse dishes, select what the customer is considering, and watch recommendations update automatically.");
     ui.add_space(8.0);
@@ -42,7 +50,7 @@ pub fn show_explore(ui: &mut egui::Ui, state: &mut AppState, available_width: f3
         let option_list_height = (content_height * 0.16).clamp(96.0, 140.0);
 
         ui.columns(2, |columns| {
-            show_menu_panel(&mut columns[0], state, None);
+            show_menu_panel(&mut columns[0], state, image_cache, None);
             egui::ScrollArea::vertical()
                 .id_source("preference_cart_scroll")
                 .max_height(content_height)
@@ -61,13 +69,18 @@ pub fn show_explore(ui: &mut egui::Ui, state: &mut AppState, available_width: f3
                 show_preference_and_cart_panel(ui, state, NARROW_OPTION_LIST_HEIGHT);
                 ui.separator();
                 ui.add_space(10.0);
-                show_menu_panel(ui, state, Some(NARROW_MENU_HEIGHT));
+                show_menu_panel(ui, state, image_cache, Some(NARROW_MENU_HEIGHT));
             });
     }
 }
 
 /// Searchable menu panel with direct dish selection.
-fn show_menu_panel(ui: &mut egui::Ui, state: &mut AppState, requested_list_height: Option<f32>) {
+fn show_menu_panel(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    image_cache: &mut DishImageCache,
+    requested_list_height: Option<f32>,
+) {
     ui.heading("Menu");
     ui.label("Search by name, ID, category, ingredient, or tag.");
     ui.add_space(6.0);
@@ -121,7 +134,12 @@ fn show_menu_panel(ui: &mut egui::Ui, state: &mut AppState, requested_list_heigh
         .auto_shrink([false, false])
         .show(ui, |ui| {
             for dish in filtered_dishes {
-                if dish_card(ui, dish, state.selected_dish_ids.contains(&dish.dish_id)) {
+                if dish_card(
+                    ui,
+                    image_cache,
+                    dish,
+                    state.selected_dish_ids.contains(&dish.dish_id),
+                ) {
                     toggled_dish_id = Some(dish.dish_id.clone());
                 }
                 ui.add_space(8.0);
@@ -138,7 +156,12 @@ fn show_menu_panel(ui: &mut egui::Ui, state: &mut AppState, requested_list_heigh
 /// The card uses bold labels for category, ingredients, and tags so viewers can
 /// quickly understand what each line means. The action is styled as a real
 /// button because plain text made the original Select affordance easy to miss.
-fn dish_card(ui: &mut egui::Ui, dish: &Dish, selected: bool) -> bool {
+fn dish_card(
+    ui: &mut egui::Ui,
+    image_cache: &mut DishImageCache,
+    dish: &Dish,
+    selected: bool,
+) -> bool {
     let mut clicked = false;
 
     egui::Frame::none()
@@ -150,25 +173,35 @@ fn dish_card(ui: &mut egui::Ui, dish: &Dish, selected: bool) -> bool {
         .rounding(8.0)
         .inner_margin(egui::Margin::symmetric(14.0, 12.0))
         .show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(egui::RichText::new(&dish.name).strong().size(16.0));
-                ui.monospace(format!("({})", dish.dish_id));
+            // Menu thumbnails are placed only inside customer-facing dish
+            // cards. They help viewers recognize food visually without mixing
+            // image concerns into preference or recommendation logic.
+            ui.horizontal(|ui| {
+                dish_thumbnail(ui, image_cache, dish, 96.0);
                 ui.add_space(12.0);
-                ui.strong("Category:");
-                ui.label(display_category(&dish.category));
+
+                ui.vertical(|ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(egui::RichText::new(&dish.name).strong().size(16.0));
+                        ui.monospace(format!("({})", dish.dish_id));
+                        ui.add_space(12.0);
+                        ui.strong("Category:");
+                        ui.label(display_category(&dish.category));
+                    });
+
+                    ui.add_space(8.0);
+                    labelled_metadata(ui, "Ingredients:", &dish.ingredients.join(", "));
+                    ui.add_space(4.0);
+                    labelled_metadata(ui, "Tags:", &dish.tags.join(", "));
+
+                    ui.add_space(10.0);
+                    // Clicking the selected state toggles the dish off because
+                    // `toggle_dish_selection` already supports select/unselect.
+                    if select_dish_button(ui, selected).clicked() {
+                        clicked = true;
+                    }
+                });
             });
-
-            ui.add_space(8.0);
-            labelled_metadata(ui, "Ingredients:", &dish.ingredients.join(", "));
-            ui.add_space(4.0);
-            labelled_metadata(ui, "Tags:", &dish.tags.join(", "));
-
-            ui.add_space(10.0);
-            // Clicking the selected state toggles the dish off because
-            // `toggle_dish_selection` already supports select/unselect.
-            if select_dish_button(ui, selected).clicked() {
-                clicked = true;
-            }
         });
 
     clicked
@@ -391,17 +424,10 @@ fn option_section(
 }
 
 /// Evaluation page with demo metrics.
-pub fn show_evaluation(ui: &mut egui::Ui, state: &AppState) {
-    // The page is now primarily for recommendation review, so the shorter title
-    // is clearer than the older "Evaluation / Recommendation Results" label.
-    ui.heading("Recommendation Results");
-    ui.label(
-        "Review generated recommendations, score breakdowns, and the reasoning behind each result.",
-    );
-    ui.separator();
-    ui.add_space(8.0);
-
-    show_recommendation_results(ui, state);
+pub fn show_evaluation(ui: &mut egui::Ui, state: &AppState, image_cache: &mut DishImageCache) {
+    // The duplicate top heading/subtitle was removed so the page presents one
+    // clear Recommendation Results section instead of repeating the same title.
+    show_recommendation_results(ui, state, image_cache);
 
     ui.add_space(16.0);
     ui.separator();
@@ -436,7 +462,11 @@ pub fn show_evaluation(ui: &mut egui::Ui, state: &AppState) {
 /// Keeping this section here separates the input workflow from output analysis:
 /// Explore is for selecting menu/preferences, while Evaluation explains the
 /// generated results and how each score was produced.
-fn show_recommendation_results(ui: &mut egui::Ui, state: &AppState) {
+fn show_recommendation_results(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    image_cache: &mut DishImageCache,
+) {
     ui.heading("Recommendation Results");
     ui.label("Each card shows the hybrid score plus the ingredient and co-order evidence used to rank the dish.");
 
@@ -455,7 +485,7 @@ fn show_recommendation_results(ui: &mut egui::Ui, state: &AppState) {
         .enumerate()
     {
         let related_labels = state.dish_labels_for_ids(&recommendation.related_selected_dish_ids);
-        recommendation_card(ui, rank + 1, recommendation, &related_labels);
+        recommendation_card(ui, image_cache, rank + 1, recommendation, &related_labels);
         ui.add_space(12.0);
     }
 }

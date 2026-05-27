@@ -97,12 +97,27 @@ pub fn load_dishes(path: &str) -> Result<Vec<Dish>> {
             ingredients: split_csv_field(&row.ingredients),
             category: row.category.trim().to_lowercase(),
             tags: split_csv_field(&row.tags),
+            // Optional image columns are intentionally not required in the CSV.
+            // Empty strings are normalized to None so the image loader can fall
+            // back to assets/dishes/{dish_id}.jpg, .png, or .jpeg.
+            image_path: clean_optional_field(row.image_path),
+            image_source_url: clean_optional_field(row.image_source_url),
         };
 
         dishes.push(dish);
     }
 
     Ok(dishes)
+}
+
+/// Converts an optional CSV field into a clean optional string.
+///
+/// This small helper keeps CSV parsing tolerant: missing image columns and
+/// blank image cells both become `None`, preserving older five-column datasets.
+fn clean_optional_field(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 /// Loads and cleans order records from `data/orders.csv`.

@@ -12,6 +12,17 @@ pub struct DishRow {
     pub ingredients: String,
     pub category: String,
     pub tags: String,
+    /// Optional local path to a dish image.
+    ///
+    /// `#[serde(default)]` keeps older CSV files compatible. If the column does
+    /// not exist, serde fills this field with `None` instead of failing.
+    #[serde(default)]
+    pub image_path: Option<String>,
+    /// Optional source URL used only for documentation/source tracking.
+    ///
+    /// The GUI does not hotlink this URL. Runtime image loading is local only.
+    #[serde(default)]
+    pub image_source_url: Option<String>,
 }
 
 /// Clean dish model used by the recommendation algorithms and GUI.
@@ -25,6 +36,17 @@ pub struct Dish {
     pub ingredients: Vec<String>,
     pub category: String,
     pub tags: Vec<String>,
+    /// Optional local image path from CSV, for example `assets/dishes/D01.jpg`.
+    ///
+    /// When this is missing or the file does not exist, the image loader tries
+    /// the fallback dish-ID filenames under `assets/dishes/`.
+    pub image_path: Option<String>,
+    /// Optional source URL retained for traceability.
+    ///
+    /// This field is not used for runtime loading because the prototype should
+    /// display local images only.
+    #[allow(dead_code)]
+    pub image_source_url: Option<String>,
 }
 
 /// Raw order record exactly as it appears in `data/orders.csv`.

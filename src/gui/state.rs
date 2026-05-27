@@ -247,6 +247,8 @@ mod tests {
             ingredients: ingredients.iter().map(|value| value.to_string()).collect(),
             category: "main".to_string(),
             tags: vec!["signature".to_string()],
+            image_path: None,
+            image_source_url: None,
         }
     }
 

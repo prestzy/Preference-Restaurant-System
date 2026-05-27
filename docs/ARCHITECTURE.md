@@ -6,10 +6,11 @@ This repository is a Rust desktop GUI prototype, not a web app. The design goal 
 
 1. `main.rs` creates missing sample data.
 2. `data_loader.rs` reads CSV files into raw row models, then cleans them into system models.
-3. `gui::RestaurantOrderingApp` starts the egui desktop application.
-4. `gui::state::AppState` owns mutable UI state and triggers recommendation refreshes.
-5. `recommender::hybrid` generates ranked recommendation results using ingredient and collaborative scores.
-6. `gui::pages` renders Dashboard, Explore & Recommend, Evaluation, and Admin / Demo Tools pages.
+3. `image_loader.rs` ensures the local dish image folder exists and later caches local thumbnails.
+4. `gui::RestaurantOrderingApp` starts the egui desktop application.
+5. `gui::state::AppState` owns mutable UI state and triggers recommendation refreshes.
+6. `recommender::hybrid` generates ranked recommendation results using ingredient and collaborative scores.
+7. `gui::pages` renders Dashboard, Explore & Recommend, Evaluation, and Admin / Demo Tools pages.
 
 ## Module Responsibilities
 
@@ -25,6 +26,8 @@ Data structures only:
 - `RecommendationResult`
 
 `DishRow` and `OrderRow` represent raw CSV rows. `Dish` and `Order` are cleaned models used by the app.
+
+`Dish` also stores optional `image_path` and `image_source_url` values. These are data fields only; image loading is handled by `image_loader.rs`.
 
 ### `data_loader.rs`
 
@@ -94,6 +97,19 @@ Selectable preference option extraction:
 
 This keeps preference option generation outside rendering code.
 
+### `image_loader.rs`
+
+Local dish image loading and caching:
+
+- Creates `assets/dishes/` at startup.
+- Uses optional `image_path` when present.
+- Falls back to `assets/dishes/{dish_id}.jpg`, `.png`, and `.jpeg`.
+- Decodes local JPG/PNG files into egui textures.
+- Caches textures by dish ID so images are not reloaded every frame.
+- Returns a missing-image state so the GUI can show a `No image` placeholder.
+
+This module does not contain CSV parsing, recommendation scoring, image downloading, or UI page logic.
+
 ### `simulation.rs`
 
 Admin/demo order simulation:
@@ -114,6 +130,13 @@ GUI modules:
 - `pages.rs`: page rendering.
 - `components.rs`: reusable visual helpers.
 - `mod.rs`: module exports.
+
+Dish thumbnails are rendered only by customer-facing components used in:
+
+- Explore & Recommend menu cards.
+- Evaluation recommendation result cards.
+
+Dashboard, preferences, admin/demo tools, and page headers do not call the image loader.
 
 ## Responsive Layout
 

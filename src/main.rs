@@ -1,5 +1,6 @@
 mod data_loader;
 mod gui;
+mod image_loader;
 mod models;
 mod preferences;
 mod recommender;
@@ -11,6 +12,7 @@ use data_loader::{
     DISHES_PATH, ORDERS_PATH, generate_sample_data_if_missing, load_dishes, load_orders,
 };
 use gui::RestaurantOrderingApp;
+use image_loader::ensure_dish_image_folder;
 
 /// Program entry point.
 ///
@@ -20,6 +22,7 @@ use gui::RestaurantOrderingApp;
 /// 3. Start the eframe/egui desktop GUI.
 fn main() -> Result<()> {
     generate_sample_data_if_missing().context("failed to create sample CSV data")?;
+    ensure_dish_image_folder().context("failed to create dish image folder")?;
 
     let dishes = load_dishes(DISHES_PATH).context("failed to load dishes.csv")?;
     let orders = load_orders(ORDERS_PATH).context("failed to load orders.csv")?;

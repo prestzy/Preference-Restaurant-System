@@ -13,6 +13,8 @@ The system considers:
 
 The output is a ranked list of recommended dishes with explanations.
 
+Local dish thumbnails help customers and evaluators recognize menu items visually. Images are used only on menu cards and recommendation cards; they are not part of the scoring algorithm.
+
 ## Why It Is Explainable
 
 The recommendation result is not a black box. Each recommended dish shows:
@@ -78,6 +80,7 @@ Future improvements can add:
 
 - More restaurant dishes.
 - More historical order records.
+- More locally stored dish images with recorded source licenses.
 - More precise dietary tags.
 - A checkout workflow.
 - More evaluation metrics.
