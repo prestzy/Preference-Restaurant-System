@@ -140,6 +140,10 @@ If you add a custom path in an optional `image_path` column in `data/dishes.csv`
 the app will try that first. If no image is found, it shows `No image` and the
 prototype continues normally.
 
+Click a dish thumbnail in either the menu or Recommendation Results to open a
+larger preview. The same preview window is reused in both places, and missing
+images simply keep the placeholder behavior.
+
 Record the image source and license in:
 
 ```text

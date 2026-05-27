@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 /// Folder used for locally stored dish thumbnails.
 ///
 /// The runtime GUI loads images from this folder only. Online URLs are kept in
+/// `assets/dish_image_sources.csv` for traceability, not for hotlinking.
 pub const DISH_IMAGE_DIR: &str = "assets/dishes";
 
 /// In-memory image cache for egui textures.

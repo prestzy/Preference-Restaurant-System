@@ -62,6 +62,8 @@ Images are shown only in:
 
 They are not shown in Dashboard, Preference Panel, Admin / Demo Tools, or page headers because images are only meant to help customers recognize menu and recommended dishes.
 
+Clicking an available dish thumbnail opens a larger in-app preview with the dish name and ID. Missing images keep the `No image` placeholder and do not affect recommendation behavior.
+
 Image source records are stored in:
 
 ```text

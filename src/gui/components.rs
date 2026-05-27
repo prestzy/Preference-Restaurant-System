@@ -9,34 +9,160 @@ const NEUTRAL_BORDER: egui::Color32 = egui::Color32::from_rgb(226, 232, 240);
 const PLACEHOLDER_FILL: egui::Color32 = egui::Color32::from_rgb(248, 250, 252);
 const MUTED_TEXT: egui::Color32 = egui::Color32::from_rgb(100, 116, 139);
 
-/// Draws one local dish thumbnail or a stable "No image" placeholder.
+/// State for the reusable image preview modal.
+///
+/// The modal is owned by the top-level app, not by individual pages. Menu cards
+/// and recommendation cards both set this state when their thumbnail is clicked,
+/// which avoids duplicating image-preview logic in multiple UI sections.
+#[derive(Debug, Clone)]
+pub struct ImagePreviewState {
+    pub dish_id: String,
+    pub dish_name: String,
+}
+
+impl ImagePreviewState {
+    /// Creates preview state from a dish without storing image data in UI state.
+    ///
+    /// The cache can re-resolve the texture from the dish ID when the modal is
+    /// rendered. Keeping only IDs/names here keeps the state lightweight.
+    pub fn from_dish(dish: &Dish) -> Self {
+        Self {
+            dish_id: dish.dish_id.clone(),
+            dish_name: dish.name.clone(),
+        }
+    }
+}
+
+/// Draws one clickable local dish thumbnail or a stable "No image" placeholder.
 ///
 /// Image rendering lives in the GUI layer, while file loading and texture
 /// caching live in `image_loader`. The same helper is reused only in the two
 /// requested customer-facing places: menu cards and recommendation cards.
-pub fn dish_thumbnail(ui: &mut egui::Ui, image_cache: &mut DishImageCache, dish: &Dish, size: f32) {
+pub fn render_dish_image_thumbnail(
+    ui: &mut egui::Ui,
+    image_cache: &mut DishImageCache,
+    preview_state: &mut Option<ImagePreviewState>,
+    dish: &Dish,
+    size: f32,
+) {
     let size = egui::vec2(size, size);
 
     if let Some(texture) = image_cache.texture_for_dish(ui.ctx(), dish) {
-        let response = ui.add(egui::Image::new((texture.id(), size)));
+        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+        let response = response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text("View larger image");
+
+        let image_rect =
+            egui::Rect::from_center_size(rect.center(), fit_image_size(texture.size_vec2(), size));
+
+        ui.painter().rect_filled(rect, 8.0, egui::Color32::WHITE);
+        ui.painter().image(
+            texture.id(),
+            image_rect,
+            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
         ui.painter()
-            .rect_stroke(response.rect, 8.0, egui::Stroke::new(1.0, NEUTRAL_BORDER));
+            .rect_stroke(rect, 8.0, egui::Stroke::new(1.0, NEUTRAL_BORDER));
+
+        if response.clicked() {
+            *preview_state = Some(ImagePreviewState::from_dish(dish));
+        }
     } else {
-        let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-        ui.painter().rect(
-            rect,
-            8.0,
-            PLACEHOLDER_FILL,
-            egui::Stroke::new(1.0, NEUTRAL_BORDER),
-        );
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "No image",
-            egui::FontId::proportional(12.0),
-            MUTED_TEXT,
-        );
+        draw_no_image_placeholder(ui, size);
     }
+}
+
+/// Draws the global image preview modal when a thumbnail has been selected.
+///
+/// The same modal is reused by menu and recommendation cards. It looks up the
+/// dish in the loaded dataset, asks the image cache for the local texture, and
+/// scales the image to fit inside the current egui window while preserving the
+/// original aspect ratio.
+pub fn render_image_preview_modal(
+    ctx: &egui::Context,
+    dishes: &[Dish],
+    image_cache: &mut DishImageCache,
+    preview_state: &mut Option<ImagePreviewState>,
+) {
+    let Some(preview) = preview_state.clone() else {
+        return;
+    };
+
+    let mut open = true;
+    let title = format!("{} ({})", preview.dish_name, preview.dish_id);
+
+    egui::Window::new(title)
+        .collapsible(false)
+        .resizable(true)
+        .default_width(720.0)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .open(&mut open)
+        .show(ctx, |ui| {
+            let Some(dish) = dishes.iter().find(|dish| dish.dish_id == preview.dish_id) else {
+                ui.label("No image available.");
+                return;
+            };
+
+            if let Some(texture) = image_cache.texture_for_dish(ctx, dish) {
+                let max_size = preview_max_size(ctx);
+                let image_size = fit_image_size(texture.size_vec2(), max_size);
+
+                ui.vertical_centered(|ui| {
+                    ui.add(egui::Image::new((texture.id(), image_size)));
+                });
+            } else {
+                ui.label("No image available.");
+            }
+        });
+
+    if !open {
+        *preview_state = None;
+    }
+}
+
+/// Draws a non-clickable placeholder for dishes without a local image.
+///
+/// Missing images should never block the FYP demo. The placeholder keeps card
+/// spacing stable while clearly showing that no local asset is available.
+fn draw_no_image_placeholder(ui: &mut egui::Ui, size: egui::Vec2) {
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    ui.painter().rect(
+        rect,
+        8.0,
+        PLACEHOLDER_FILL,
+        egui::Stroke::new(1.0, NEUTRAL_BORDER),
+    );
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "No image",
+        egui::FontId::proportional(12.0),
+        MUTED_TEXT,
+    );
+}
+
+/// Returns the largest preview size allowed inside the current window.
+fn preview_max_size(ctx: &egui::Context) -> egui::Vec2 {
+    let screen_size = ctx.screen_rect().size();
+    egui::vec2(
+        (screen_size.x * 0.72).max(260.0),
+        (screen_size.y * 0.68).max(220.0),
+    )
+}
+
+/// Fits an image inside a bounding box while preserving aspect ratio.
+fn fit_image_size(original: egui::Vec2, max_size: egui::Vec2) -> egui::Vec2 {
+    if original.x <= 0.0 || original.y <= 0.0 {
+        return egui::vec2(320.0, 240.0);
+    }
+
+    let scale = (max_size.x / original.x)
+        .min(max_size.y / original.y)
+        .min(3.0);
+
+    original * scale
 }
 
 /// Displays a list of values as compact chips.
@@ -109,6 +235,7 @@ pub fn option_chip(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
 pub fn recommendation_card(
     ui: &mut egui::Ui,
     image_cache: &mut DishImageCache,
+    preview_state: &mut Option<ImagePreviewState>,
     rank: usize,
     recommendation: &RecommendationResult,
     related_selected_dish_labels: &[String],
@@ -118,7 +245,13 @@ pub fn recommendation_card(
         // stakeholders inspect the recommendation output. The image is kept to
         // the left and all reasoning text stays on the right for readability.
         ui.horizontal(|ui| {
-            dish_thumbnail(ui, image_cache, &recommendation.dish, 96.0);
+            render_dish_image_thumbnail(
+                ui,
+                image_cache,
+                preview_state,
+                &recommendation.dish,
+                96.0,
+            );
             ui.add_space(12.0);
 
             ui.vertical(|ui| {

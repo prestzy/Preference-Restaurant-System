@@ -1,3 +1,4 @@
+use super::components::{ImagePreviewState, render_image_preview_modal};
 use super::pages::{show_admin_demo_tools, show_dashboard, show_evaluation, show_explore};
 use super::state::{AppPage, AppState};
 use crate::image_loader::DishImageCache;
@@ -11,6 +12,7 @@ use eframe::egui;
 pub struct RestaurantOrderingApp {
     state: AppState,
     image_cache: DishImageCache,
+    image_preview: Option<ImagePreviewState>,
 }
 
 impl RestaurantOrderingApp {
@@ -21,6 +23,7 @@ impl RestaurantOrderingApp {
         Self {
             state: AppState::new(dishes, orders),
             image_cache: DishImageCache::new(),
+            image_preview: None,
         }
     }
 
@@ -95,25 +98,42 @@ impl eframe::App for RestaurantOrderingApp {
 
             match active_page {
                 // Explore has its own internal scroll regions for menu,
-                // preferences, and recommendations. Avoiding a page-level
+                // preferences, and selected dishes. Avoiding a page-level
                 // scroll area lets the menu panel fill the bottom of the
                 // window instead of leaving unused vertical space.
-                AppPage::ExploreRecommend => {
-                    show_explore(ui, &mut self.state, &mut self.image_cache, available_width)
-                }
+                AppPage::ExploreRecommend => show_explore(
+                    ui,
+                    &mut self.state,
+                    &mut self.image_cache,
+                    &mut self.image_preview,
+                    available_width,
+                ),
                 _ => {
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .show(ui, |ui| match active_page {
                             AppPage::ExploreRecommend => unreachable!(),
                             AppPage::Dashboard => show_dashboard(ui, &self.state),
-                            AppPage::Evaluation => {
-                                show_evaluation(ui, &self.state, &mut self.image_cache)
-                            }
+                            AppPage::Evaluation => show_evaluation(
+                                ui,
+                                &self.state,
+                                &mut self.image_cache,
+                                &mut self.image_preview,
+                            ),
                             AppPage::AdminDemoTools => show_admin_demo_tools(ui, &mut self.state),
                         });
                 }
             };
         });
+
+        // Image preview state is owned once at app level and rendered after the
+        // active page. Both menu thumbnails and recommendation thumbnails set
+        // the same state, so the modal behaviour stays consistent everywhere.
+        render_image_preview_modal(
+            ctx,
+            &self.state.dishes,
+            &mut self.image_cache,
+            &mut self.image_preview,
+        );
     }
 }
