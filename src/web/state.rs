@@ -70,11 +70,21 @@ impl WebState {
     /// Builds a dashboard/admin view with summary counts and management data.
     pub fn admin_view(&self) -> AdminView {
         let dishes = self.all_dish_views();
-        let live_orders = self
+        let all_live_orders = self
             .live_orders
             .read()
             .expect("live orders lock poisoned")
             .clone();
+        let live_orders = all_live_orders
+            .iter()
+            .filter(|order| order.status != OrderStatus::Completed)
+            .cloned()
+            .collect::<Vec<_>>();
+        let completed_session_orders = all_live_orders
+            .iter()
+            .filter(|order| order.status == OrderStatus::Completed)
+            .cloned()
+            .collect::<Vec<_>>();
         let historical_orders = self
             .historical_orders
             .read()
@@ -94,8 +104,10 @@ impl WebState {
             unavailable_dishes,
             historical_order_count: self.historical_order_count(),
             live_order_count: live_orders.len(),
+            completed_session_order_count: completed_session_orders.len(),
             dishes,
             live_orders,
+            completed_session_orders,
             historical_orders,
             frequent_dishes: self.frequent_dishes(6),
             co_order_pairs: self.common_co_order_pairs(6),
@@ -127,22 +139,30 @@ impl WebState {
     /// Creates a live web order from checkout dish IDs.
     pub fn create_live_order(&self, dish_ids: &[String]) -> Result<LiveOrder, String> {
         let dishes = self.available_dishes();
-        let valid_ids = dishes
+        let dish_lookup = dishes
             .iter()
-            .map(|dish| dish.dish_id.clone())
-            .collect::<HashSet<_>>();
+            .map(|dish| (dish.dish_id.clone(), dish.clone()))
+            .collect::<HashMap<_, _>>();
 
-        let mut cleaned = dish_ids
+        let cleaned = dish_ids
             .iter()
             .map(|dish_id| dish_id.trim().to_uppercase())
-            .filter(|dish_id| valid_ids.contains(dish_id))
+            .filter(|dish_id| dish_lookup.contains_key(dish_id))
             .collect::<Vec<_>>();
-        cleaned.sort();
-        cleaned.dedup();
 
         if cleaned.is_empty() {
             return Err("No valid available menu item was submitted.".to_string());
         }
+
+        let dish_names = cleaned
+            .iter()
+            .filter_map(|dish_id| dish_lookup.get(dish_id))
+            .map(|dish| dish.name.clone())
+            .collect::<Vec<_>>();
+        let total_price_amount = cleaned
+            .iter()
+            .map(|dish_id| placeholder_price_amount(dish_id))
+            .sum();
 
         let mut live_orders = self.live_orders.write().expect("live orders lock poisoned");
         let order_number = live_orders.len() + 1;
@@ -150,7 +170,10 @@ impl WebState {
             order_id: format!("WEB{order_number:03}"),
             session_user_id: "QR-CUSTOMER".to_string(),
             ordered_dishes: cleaned,
+            dish_names,
             timestamp: unix_timestamp_label(),
+            total_price: format!("RM {total_price_amount}"),
+            total_price_amount,
             status: OrderStatus::Pending,
         };
 
@@ -164,16 +187,55 @@ impl WebState {
         order_id: &str,
         status: OrderStatus,
     ) -> Result<LiveOrder, String> {
-        let mut live_orders = self.live_orders.write().expect("live orders lock poisoned");
-        let Some(order) = live_orders
-            .iter_mut()
-            .find(|order| order.order_id.eq_ignore_ascii_case(order_id))
-        else {
-            return Err(format!("Live order {order_id} was not found."));
+        let updated_order = {
+            let mut live_orders = self.live_orders.write().expect("live orders lock poisoned");
+            let Some(order) = live_orders
+                .iter_mut()
+                .find(|order| order.order_id.eq_ignore_ascii_case(order_id))
+            else {
+                return Err(format!("Live order {order_id} was not found."));
+            };
+
+            order.status = status;
+            order.clone()
         };
 
-        order.status = status;
-        Ok(order.clone())
+        if status == OrderStatus::Completed {
+            self.append_completed_order_to_history(&updated_order);
+        }
+
+        Ok(updated_order)
+    }
+
+    /// Adds a completed checkout order to the in-memory historical order log.
+    ///
+    /// This makes the Admin "Historical Orders" table update immediately when
+    /// staff mark an order Completed. The append is guarded by `order_id` so
+    /// repeated status updates do not duplicate the same order log.
+    fn append_completed_order_to_history(&self, completed_order: &LiveOrder) {
+        let mut historical_orders = self
+            .historical_orders
+            .write()
+            .expect("historical orders lock poisoned");
+        if historical_orders.iter().any(|order| {
+            order
+                .order_id
+                .eq_ignore_ascii_case(&completed_order.order_id)
+        }) {
+            return;
+        }
+
+        historical_orders.push(completed_order.as_order());
+    }
+
+    /// Finds one live/session order for the customer order tracking page.
+    pub fn order_by_id(&self, order_id: &str) -> Option<LiveOrder> {
+        self.live_orders
+            .read()
+            .expect("live orders lock poisoned")
+            .iter()
+            .find(|order| order.order_id.eq_ignore_ascii_case(order_id))
+            .cloned()
     }
 
     /// Adds or edits a dish in memory.
@@ -275,6 +337,27 @@ impl WebState {
         count
     }
 
+    /// Merges imported dishes into the in-memory menu by `dish_id`.
+    ///
+    /// Existing records are replaced and new records are appended. This gives
+    /// staff a safer CSV workflow when they only want to update part of the menu
+    /// instead of replacing the whole dataset.
+    pub fn merge_dishes_from_csv(&self, imported: Vec<Dish>) -> usize {
+        let count = imported.len();
+        let mut dishes = self.dishes.write().expect("dishes lock poisoned");
+        for imported_dish in imported {
+            if let Some(existing) = dishes
+                .iter_mut()
+                .find(|dish| dish.dish_id == imported_dish.dish_id)
+            {
+                *existing = imported_dish;
+            } else {
+                dishes.push(imported_dish);
+            }
+        }
+        count
+    }
+
     /// Replaces historical order logs in memory after admin CSV import.
     ///
     /// Live customer checkout orders are intentionally not touched because they
@@ -300,6 +383,17 @@ impl WebState {
             .read()
             .expect("historical orders lock poisoned")
             .clone()
+    }
+
+    /// Returns completed checkout orders as CSV-compatible order records.
+    pub fn completed_session_orders_for_export(&self) -> Vec<Order> {
+        self.live_orders
+            .read()
+            .expect("live orders lock poisoned")
+            .iter()
+            .filter(|order| order.status == OrderStatus::Completed)
+            .map(LiveOrder::as_order)
+            .collect()
     }
 
     fn preference_options(&self) -> PreferenceOptions {
@@ -350,19 +444,13 @@ impl WebState {
     }
 
     fn combined_orders(&self) -> Vec<Order> {
-        let mut orders = self
-            .historical_orders
+        // Completed checkout orders are appended to `historical_orders` when
+        // their status changes to Completed. Reading one source here avoids
+        // double-counting the same completed order in collaborative filtering.
+        self.historical_orders
             .read()
             .expect("historical orders lock poisoned")
-            .clone();
-        orders.extend(
-            self.live_orders
-                .read()
-                .expect("live orders lock poisoned")
-                .iter()
-                .map(LiveOrder::as_order),
-        );
-        orders
+            .clone()
     }
 
     fn historical_order_count(&self) -> usize {
@@ -484,8 +572,10 @@ pub struct AdminView {
     pub unavailable_dishes: usize,
     pub historical_order_count: usize,
     pub live_order_count: usize,
+    pub completed_session_order_count: usize,
     pub dishes: Vec<DishView>,
     pub live_orders: Vec<LiveOrder>,
+    pub completed_session_orders: Vec<LiveOrder>,
     pub historical_orders: Vec<Order>,
     pub frequent_dishes: Vec<FrequencyView>,
     pub co_order_pairs: Vec<FrequencyView>,
@@ -612,7 +702,10 @@ pub struct LiveOrder {
     pub order_id: String,
     pub session_user_id: String,
     pub ordered_dishes: Vec<String>,
+    pub dish_names: Vec<String>,
     pub timestamp: String,
+    pub total_price: String,
+    pub total_price_amount: u32,
     pub status: OrderStatus,
 }
 
@@ -955,6 +1048,63 @@ mod tests {
             .unwrap();
 
         assert_eq!(state.admin_view().live_orders[0].status, OrderStatus::Ready);
+    }
+
+    #[test]
+    fn completed_order_moves_to_completed_session_section() {
+        let dishes = vec![
+            dish("D01", "Nasi Lemak", "main", &["rice"], &["signature"]),
+            dish("D02", "Satay", "main", &["chicken"], &["grilled"]),
+        ];
+        let state = WebState::new(dishes, Vec::new());
+        let order = state
+            .create_live_order(&["D01".to_string(), "D02".to_string()])
+            .unwrap();
+
+        state
+            .update_order_status(&order.order_id, OrderStatus::Completed)
+            .unwrap();
+
+        let admin = state.admin_view();
+        assert!(admin.live_orders.is_empty());
+        assert_eq!(admin.completed_session_orders.len(), 1);
+        assert_eq!(
+            admin.completed_session_orders[0].dish_names,
+            vec!["Nasi Lemak", "Satay"]
+        );
+        assert_eq!(admin.historical_orders[0].order_id, order.order_id);
+        assert!(
+            state.completed_session_orders_for_export()[0]
+                .ordered_dishes
+                .contains(&"D01".to_string())
+        );
+    }
+
+    #[test]
+    fn checkout_order_keeps_duplicate_items_for_total_price() {
+        let dishes = vec![dish("D01", "Nasi Lemak", "main", &["rice"], &["signature"])];
+        let state = WebState::new(dishes, Vec::new());
+
+        let order = state
+            .create_live_order(&["D01".to_string(), "D01".to_string()])
+            .unwrap();
+
+        assert_eq!(order.ordered_dishes, vec!["D01", "D01"]);
+        assert_eq!(order.dish_names, vec!["Nasi Lemak", "Nasi Lemak"]);
+        assert!(order.total_price_amount > placeholder_price_amount("D01"));
+    }
+
+    #[test]
+    fn menu_view_uses_dish_id_image_fallback_when_available() {
+        let dishes = vec![dish("D01", "Nasi Lemak", "main", &["rice"], &["signature"])];
+        let state = WebState::new(dishes, Vec::new());
+
+        let view = state.menu_view();
+
+        assert_eq!(
+            view.dishes[0].image_url.as_deref(),
+            Some("/assets/dishes/D01.jpg")
+        );
     }
 
     #[test]

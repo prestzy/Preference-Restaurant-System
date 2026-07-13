@@ -38,8 +38,16 @@ pub fn router(state: WebState) -> Router {
             post(handlers::admin::import_dishes_csv),
         )
         .route(
+            "/api/admin/reload/dishes",
+            post(handlers::admin::reload_dishes_from_file),
+        )
+        .route(
             "/api/admin/import/orders",
             post(handlers::admin::import_orders_csv),
+        )
+        .route(
+            "/api/admin/reload/orders",
+            post(handlers::admin::reload_orders_from_file),
         )
         .route(
             "/admin/export/dishes.csv",
@@ -49,6 +57,11 @@ pub fn router(state: WebState) -> Router {
             "/admin/export/orders.csv",
             get(handlers::admin::export_orders_csv),
         )
+        .route(
+            "/admin/export/completed-session-orders.csv",
+            get(handlers::admin::export_completed_session_orders_csv),
+        )
+        .route("/api/orders/:order_id", get(handlers::orders::order_status))
         // Static files are local only. Dish images are served from `/assets`
         // so CSV image paths such as `assets/dishes/D01.jpg` become
         // `/assets/dishes/D01.jpg` in customer/admin pages.

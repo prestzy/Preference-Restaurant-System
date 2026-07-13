@@ -19,7 +19,6 @@ Restaurant staff use the Admin page to:
 - monitor live orders
 - update order status
 - manage dishes in memory
-- import/export CSV data
 - test recommendation scenarios
 
 ## Why QR-Based Web Ordering
@@ -70,7 +69,6 @@ The Admin page supports prototype operations:
 - live order table
 - order status workflow
 - dish management
-- CSV import/export
 - recommendation testing/evaluation
 - historical order table
 

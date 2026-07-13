@@ -1,4 +1,5 @@
 const CART_KEY = "fyp_web_cart_v1";
+const LAST_ORDER_KEY = "fyp_last_order_id_v1";
 
 function readCart() {
   try {
@@ -56,6 +57,48 @@ function imageHtml(dish, extraClass = "") {
   return `<div class="dish-art placeholder ${extraClass}" aria-label="No image">🍽</div>`;
 }
 
+function dishSearchHaystack(dish) {
+  return [
+    dish?.name,
+    dish?.dish_id,
+    dish?.category,
+    ...(dish?.ingredients || []),
+    ...(dish?.tags || []),
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
+function dishMatchReason(dish, terms) {
+  const lowerTerms = terms.map((term) => term.toLowerCase());
+  const name = String(dish.name || "").toLowerCase();
+  const category = String(dish.category || "").toLowerCase();
+
+  for (const term of lowerTerms) {
+    const ingredient = (dish.ingredients || []).find((value) =>
+      String(value).toLowerCase().includes(term)
+    );
+    if (ingredient) {
+      return `ingredient: ${ingredient}`;
+    }
+
+    const tag = (dish.tags || []).find((value) => String(value).toLowerCase().includes(term));
+    if (tag) {
+      return `tag: ${tag}`;
+    }
+
+    if (category.includes(term)) {
+      return `category: ${dish.category}`;
+    }
+
+    if (name.includes(term)) {
+      return "dish name match";
+    }
+  }
+
+  return "menu match";
+}
+
 function addToCart(dishId) {
   const cart = readCart();
   cart[dishId] = (cart[dishId] || 0) + 1;
@@ -93,6 +136,7 @@ function setupMenuFiltering() {
   const searchInput = document.getElementById("search-input");
   const cards = Array.from(document.querySelectorAll(".dish-card"));
   const visibleCount = document.getElementById("visible-count");
+  const suggestions = document.getElementById("search-suggestions");
   let activeCategory = "all";
 
   if (!cards.length) {
@@ -119,6 +163,7 @@ function setupMenuFiltering() {
     if (visibleCount) {
       visibleCount.textContent = count.toString();
     }
+    renderSearchSuggestions(terms, suggestions);
   };
 
   searchInput?.addEventListener("input", applyFilters);
@@ -135,6 +180,62 @@ function setupMenuFiltering() {
   });
 
   applyFilters();
+}
+
+function renderSearchSuggestions(terms, container) {
+  if (!container) {
+    return;
+  }
+
+  if (!terms.length) {
+    container.hidden = true;
+    container.innerHTML = "";
+    return;
+  }
+
+  const matches = (window.MENU_DISHES || [])
+    .filter((dish) => terms.every((term) => dishSearchHaystack(dish).includes(term)))
+    .slice(0, 6);
+
+  container.hidden = false;
+  if (!matches.length) {
+    container.innerHTML = `<div class="suggestion-empty">No matching dishes found</div>`;
+    return;
+  }
+
+  container.innerHTML = matches
+    .map((dish) => {
+      return `
+        <button class="suggestion-item" type="button" data-suggestion-dish="${escapeHtml(dish.dish_id)}">
+          ${imageHtml(dish, "suggestion-thumb")}
+          <span>
+            <strong>${escapeHtml(dish.name)}</strong>
+            <small>${escapeHtml(dish.category)} · ${escapeHtml(dish.price)} · ${escapeHtml(dishMatchReason(dish, terms))}</small>
+          </span>
+        </button>
+      `;
+    })
+    .join("");
+
+  container.querySelectorAll("[data-suggestion-dish]").forEach((button) => {
+    button.addEventListener("click", () => {
+      focusDishFromSuggestion(button.dataset.suggestionDish);
+      container.hidden = true;
+    });
+  });
+}
+
+function focusDishFromSuggestion(dishId) {
+  const card = document.querySelector(`.dish-card[data-dish-id="${CSS.escape(dishId)}"]`);
+  if (card) {
+    card.hidden = false;
+    card.scrollIntoView({ behavior: "smooth", block: "center" });
+    card.classList.add("focused");
+    window.setTimeout(() => card.classList.remove("focused"), 1400);
+    return;
+  }
+
+  showDishDetail(dishId);
 }
 
 function setupCartButtons() {
@@ -455,6 +556,9 @@ function setupCheckout() {
       status.textContent = result.message;
 
       if (result.ok) {
+        if (result.order_id) {
+          localStorage.setItem(LAST_ORDER_KEY, result.order_id);
+        }
         writeCart({});
         renderCartPage();
       }
@@ -469,7 +573,6 @@ function setupCheckout() {
 function setupAdminTools() {
   setupAdminOrderStatus();
   setupDishManagement();
-  setupCsvTools();
   setupAdminRecommendationTester();
 }
 
@@ -477,11 +580,18 @@ function setupAdminOrderStatus() {
   document.querySelectorAll("[data-order-status]").forEach((select) => {
     select.addEventListener("change", async () => {
       const orderId = select.dataset.orderStatus;
-      await fetch(`/api/admin/orders/${encodeURIComponent(orderId)}/status`, {
+      const response = await fetch(`/api/admin/orders/${encodeURIComponent(orderId)}/status`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: select.value }),
       });
+      const result = await response.json();
+      if (result.ok && (select.value === "Completed" || select.value === "Cancelled")) {
+        // Completed/cancelled orders leave the active live-order table. Reloading
+        // keeps the admin view honest and makes the completed-session section
+        // update immediately without pretending persistence exists.
+        window.setTimeout(() => window.location.reload(), 400);
+      }
     });
   });
 }
@@ -550,10 +660,25 @@ function setupDishManagement() {
 
 function setupCsvTools() {
   const status = document.getElementById("csv-import-status");
+  setupCsvFileInput("dish-csv-file", "dish-csv-import", "dish-csv-preview", [
+    "dish_id",
+    "name",
+    "ingredients",
+    "category",
+    "tags",
+  ]);
+  setupCsvFileInput("order-csv-file", "order-csv-import", "order-csv-preview", [
+    "order_id",
+    "session_user_id",
+    "ordered_dishes",
+    "timestamp",
+  ]);
 
   document.getElementById("import-dishes-button")?.addEventListener("click", async () => {
     const csv = document.getElementById("dish-csv-import")?.value || "";
-    const result = await postCsvImport("/api/admin/import/dishes", csv);
+    const mode =
+      document.querySelector('input[name="dish-import-mode"]:checked')?.value || "replace";
+    const result = await postCsvImport("/api/admin/import/dishes", csv, mode);
     if (status) {
       status.textContent = result.message;
     }
@@ -572,15 +697,148 @@ function setupCsvTools() {
       window.setTimeout(() => window.location.reload(), 700);
     }
   });
+
+  document.getElementById("reload-dishes-button")?.addEventListener("click", async () => {
+    const result = await postJson("/api/admin/reload/dishes", {});
+    if (status) {
+      status.textContent = result.message;
+    }
+    if (result.ok) {
+      window.setTimeout(() => window.location.reload(), 700);
+    }
+  });
+
+  document.getElementById("reload-orders-button")?.addEventListener("click", async () => {
+    const result = await postJson("/api/admin/reload/orders", {});
+    if (status) {
+      status.textContent = result.message;
+    }
+    if (result.ok) {
+      window.setTimeout(() => window.location.reload(), 700);
+    }
+  });
 }
 
-async function postCsvImport(url, csv) {
+async function postJson(url, payload) {
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ csv }),
+    body: JSON.stringify(payload),
   });
   return response.json();
+}
+
+async function postCsvImport(url, csv, mode = "replace") {
+  return postJson(url, { csv, mode });
+}
+
+function setupCsvFileInput(inputId, textareaId, previewId, requiredColumns) {
+  const input = document.getElementById(inputId);
+  const textarea = document.getElementById(textareaId);
+  const preview = document.getElementById(previewId);
+  if (!input || !textarea || !preview) {
+    return;
+  }
+
+  input.addEventListener("change", async () => {
+    const file = input.files?.[0];
+    if (!file) {
+      return;
+    }
+    const csv = await file.text();
+    textarea.value = csv;
+    previewCsv(csv, preview, requiredColumns);
+  });
+
+  textarea.addEventListener("input", () => previewCsv(textarea.value, preview, requiredColumns));
+}
+
+function previewCsv(csv, target, requiredColumns) {
+  const rows = csv
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!rows.length) {
+    target.innerHTML = "";
+    return;
+  }
+
+  const headers = splitCsvPreviewRow(rows[0]).map((value) => value.trim());
+  const normalizedHeaders = headers.map((value) => value.toLowerCase());
+  const missing = requiredColumns.filter((column) => !normalizedHeaders.includes(column));
+  const bodyRows = rows.slice(1, 6).map(splitCsvPreviewRow);
+
+  const warning = missing.length
+    ? `<p class="csv-error">Missing required column(s): ${escapeHtml(missing.join(", "))}</p>`
+    : `<p class="csv-ok">Preview ready: ${rows.length - 1} record(s) detected.</p>`;
+
+  const headerHtml = headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("");
+  const bodyHtml = bodyRows
+    .map((row) => `<tr>${headers.map((_, index) => `<td>${escapeHtml(row[index] || "")}</td>`).join("")}</tr>`)
+    .join("");
+
+  target.innerHTML = `
+    ${warning}
+    <div class="table-wrap csv-preview-table">
+      <table>
+        <thead><tr>${headerHtml}</tr></thead>
+        <tbody>${bodyHtml}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function splitCsvPreviewRow(row) {
+  const values = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < row.length; index += 1) {
+    const character = row[index];
+    if (character === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (character === "," && !inQuotes) {
+      values.push(current);
+      current = "";
+      continue;
+    }
+    current += character;
+  }
+
+  values.push(current);
+  return values;
+}
+
+async function setupCustomerOrderStatus() {
+  const target = document.getElementById("latest-order-status");
+  if (!target) {
+    return;
+  }
+
+  const orderId = localStorage.getItem(LAST_ORDER_KEY);
+  if (!orderId) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}`);
+    const result = await response.json();
+    if (!result.ok || !result.order) {
+      target.innerHTML = `<strong>${escapeHtml(orderId)}</strong><span>${escapeHtml(result.message)}</span>`;
+      return;
+    }
+
+    const order = result.order;
+    target.innerHTML = `
+      <strong>${escapeHtml(order.order_id)} · ${escapeHtml(order.status)}</strong>
+      <span>${escapeHtml((order.dish_names || []).join(", "))}</span>
+      <span>${escapeHtml(order.total_price)} · ${escapeHtml(order.timestamp)}</span>
+    `;
+  } catch {
+    target.innerHTML = `<strong>${escapeHtml(orderId)}</strong><span>Unable to fetch latest order status.</span>`;
+  }
 }
 
 function setupAdminRecommendationTester() {
@@ -624,5 +882,6 @@ document.addEventListener("DOMContentLoaded", () => {
   renderCartPage();
   setupCheckout();
   setupAdminTools();
+  setupCustomerOrderStatus();
   refreshCustomerRecommendations();
 });

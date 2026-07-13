@@ -128,10 +128,16 @@ Historical order logs power the co-order collaborative filtering matrix.
 
 The Admin page can:
 
-- import dish CSV text
+- import dish CSV from a file picker
+- preview dish CSV rows before applying
+- replace all dishes or merge imported dishes by `dish_id`
+- reload dishes from `data/dishes.csv`
 - export current in-memory dishes
-- import historical order CSV text
+- import historical order CSV from a file picker
+- preview historical order CSV rows before applying
+- reload historical orders from `data/orders.csv`
 - export current historical orders
+- export completed checkout orders from the current server session
 
 Imports affect the running server session. Use export to download the current in-memory dataset.
 

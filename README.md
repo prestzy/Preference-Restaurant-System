@@ -7,7 +7,7 @@ The project direction is now QR-based ordering: customers scan a QR code with th
 ## Current Features
 
 - Mobile-first orange/white customer menu.
-- Search by dish name, dish ID, ingredient, category, or tag.
+- Search by dish name, dish ID, ingredient, category, or tag, with live suggestions.
 - Category chips for All, Main, Side, Appetizer, and Dessert.
 - Local dish image support with a graceful placeholder.
 - “Recommended for You” cards powered by Rust recommendation logic.
@@ -16,8 +16,9 @@ The project direction is now QR-based ordering: customers scan a QR code with th
   - disliked ingredients
   - preferred tags
 - Cart with quantities, total price placeholder, and prototype checkout.
-- Live in-memory orders created from checkout.
-- Staff/admin page for dashboard metrics, live order status, dish management, CSV tools, and recommendation testing.
+- Live in-memory orders created from checkout, with status tracking.
+- Completed checkout orders are added immediately to Historical Orders for the current server session.
+- Staff/admin page for dashboard metrics, live order status, dish management, historical orders, and recommendation testing.
 - CSV-based data loading, import, and export.
 
 ## Run Locally
@@ -106,4 +107,4 @@ cargo check
 cargo test
 ```
 
-Tests cover CSV parsing, search/filter logic, preference option extraction, recommendation behavior, checkout/live orders, admin availability, and dish management state.
+Tests cover CSV parsing/validation, search/filter logic, preference option extraction, recommendation behavior, checkout/live orders, completed order lifecycle, image fallback, admin availability, and dish management state.

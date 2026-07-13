@@ -1,5 +1,5 @@
 use crate::models::{Dish, DishRow, Order, OrderRow};
-use anyhow::Result;
+use anyhow::{Result, bail};
 use std::fs::{self, OpenOptions};
 use std::io::Read;
 use std::path::Path;
@@ -93,6 +93,10 @@ pub fn parse_dishes_from_reader<R: Read>(reader: R) -> Result<Vec<Dish>> {
         .trim(csv::Trim::All)
         .from_reader(reader);
     let headers = reader.headers()?.clone();
+    validate_required_headers(
+        &headers,
+        &["dish_id", "name", "ingredients", "category", "tags"],
+    )?;
     let mut dishes = Vec::new();
 
     for result in reader.records() {
@@ -190,6 +194,10 @@ pub fn parse_orders_from_reader<R: Read>(reader: R) -> Result<Vec<Order>> {
         .trim(csv::Trim::All)
         .from_reader(reader);
     let headers = reader.headers()?.clone();
+    validate_required_headers(
+        &headers,
+        &["order_id", "session_user_id", "ordered_dishes", "timestamp"],
+    )?;
     let mut orders = Vec::new();
 
     for result in reader.records() {
@@ -239,6 +247,30 @@ fn clean_order_row(row: OrderRow) -> Order {
         ordered_dishes,
         timestamp: row.timestamp.trim().to_string(),
     }
+}
+
+/// Validates that a CSV file contains the columns required by the prototype.
+///
+/// Serde's missing-field error is technically correct, but it is not friendly
+/// enough for restaurant staff. This helper produces a short admin-facing error
+/// such as `CSV missing required column(s): ingredients, tags`.
+fn validate_required_headers(headers: &csv::StringRecord, required: &[&str]) -> Result<()> {
+    let normalized_headers = headers
+        .iter()
+        .map(|header| header.trim().to_lowercase())
+        .collect::<Vec<_>>();
+
+    let missing = required
+        .iter()
+        .filter(|column| !normalized_headers.iter().any(|header| header == **column))
+        .copied()
+        .collect::<Vec<_>>();
+
+    if !missing.is_empty() {
+        bail!("CSV missing required column(s): {}", missing.join(", "));
+    }
+
+    Ok(())
 }
 
 /// Appends a simulated order to `data/orders.csv`.
@@ -328,5 +360,30 @@ O001,U01,"d01, D02",2026-01-01 12:30
         let orders = parse_orders_from_reader(Cursor::new(csv)).expect("CSV should parse");
 
         assert_eq!(orders[0].ordered_dishes, vec!["D01", "D02"]);
+    }
+
+    #[test]
+    fn dish_csv_reports_missing_required_columns() {
+        let csv = r#"dish_id,name,category
+D01,Nasi Lemak,main
+"#;
+
+        let error = parse_dishes_from_reader(Cursor::new(csv))
+            .expect_err("missing required columns should be reported");
+
+        assert!(error.to_string().contains("ingredients"));
+        assert!(error.to_string().contains("tags"));
+    }
+
+    #[test]
+    fn order_csv_reports_missing_required_columns() {
+        let csv = r#"order_id,session_user_id,timestamp
+O001,U01,2026-01-01 12:30
+"#;
+
+        let error = parse_orders_from_reader(Cursor::new(csv))
+            .expect_err("missing ordered_dishes should be reported");
+
+        assert!(error.to_string().contains("ordered_dishes"));
     }
 }

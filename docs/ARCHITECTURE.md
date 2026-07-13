@@ -10,7 +10,7 @@ This repository is a lightweight Rust web prototype for QR-based restaurant orde
 4. `web::routes` maps URLs to focused handlers.
 5. `web::handlers::*` process HTTP requests.
 6. `web::templates` renders server-side HTML.
-7. `static/app.js` handles browser-only interaction: search, chips, cart quantities, modal details, checkout, admin actions, and recommendation refresh.
+7. `static/app.js` handles browser-only interaction: live search suggestions, chips, cart quantities, modal details, checkout, admin CSV file preview, admin actions, and recommendation refresh.
 8. `recommender::*` remains the only place where recommendation scoring is calculated.
 
 ## Module Responsibilities
@@ -31,7 +31,8 @@ CSV and file handling only:
 - Generates sample data if files are missing.
 - Loads dishes and orders from CSV.
 - Reuses the same parsers for admin CSV import.
-- Exports current in-memory dishes and historical orders as CSV.
+- Validates required CSV headers before import.
+- Exports current in-memory dishes, historical orders, and completed session orders as CSV.
 
 ### `recommender/`
 
@@ -48,7 +49,7 @@ The web layer passes cleaned `UserPreference` values into these modules. The rec
 Web-facing application state:
 
 - Holds loaded dishes and historical order logs.
-- Holds live in-memory orders created by checkout.
+- Holds live in-memory orders created by checkout, including dish names, totals, and status.
 - Tracks dish availability for admin management.
 - Converts domain models into frontend-friendly view models.
 - Resolves local dish image URLs.
@@ -65,7 +66,7 @@ Focused request handlers:
 - `menu.rs`: customer menu page.
 - `cart.rs`: cart page and checkout endpoint.
 - `orders.rs`: customer orders page.
-- `admin.rs`: admin dashboard, order status updates, dish management, CSV import/export.
+- `admin.rs`: admin dashboard, order status updates, and dish management.
 - `recommendations.rs`: recommendation API bridge.
 
 ### `web/templates.rs`
@@ -77,7 +78,7 @@ Server-rendered HTML:
 - Recommendation cards.
 - Dish cards and dish detail modal.
 - Cart/orders pages.
-- Admin dashboard, live orders, dish management, CSV tools, and recommendation tester.
+- Admin dashboard, live orders, dish management, historical orders, and recommendation tester.
 
 Templates receive prepared view models. They do not load CSV files or run recommendation algorithms.
 
@@ -106,7 +107,8 @@ This separation keeps the FYP prototype explainable and easier to extend.
 - Admin dish changes are in memory for the running server session.
 - Admin CSV export downloads the current in-memory state.
 - Checkout creates live in-memory orders.
-- Historical order CSV import replaces historical logs in memory and immediately affects collaborative/hybrid recommendation results.
+- Completed checkout orders are appended immediately to the in-memory historical order log and included as session co-order evidence.
+- Historical order CSV import/reload replaces historical logs in memory and immediately affects collaborative/hybrid recommendation results.
 
 This is deliberate for a prototype: it demonstrates the workflow without adding database complexity.
 

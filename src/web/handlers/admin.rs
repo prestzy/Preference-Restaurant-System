@@ -1,5 +1,6 @@
 use crate::data_loader::{
-    dishes_to_csv, orders_to_csv, parse_dishes_from_reader, parse_orders_from_reader,
+    DISHES_PATH, ORDERS_PATH, dishes_to_csv, load_dishes, load_orders, orders_to_csv,
+    parse_dishes_from_reader, parse_orders_from_reader,
 };
 use crate::web::state::{DishView, LiveOrder, OrderStatus, UpsertDishRequest, WebState};
 use crate::web::templates;
@@ -84,14 +85,44 @@ pub async fn import_dishes_csv(
     match parse_dishes_from_reader(Cursor::new(payload.csv)) {
         Ok(dishes) if dishes.is_empty() => Json(ApiResponse::error("CSV contained no dishes.")),
         Ok(dishes) => {
-            let count = state.replace_dishes_from_csv(dishes);
+            let mode = ImportMode::from_value(payload.mode.as_deref());
+            let count = match mode {
+                ImportMode::Replace => state.replace_dishes_from_csv(dishes),
+                ImportMode::Merge => state.merge_dishes_from_csv(dishes),
+            };
             Json(ApiResponse::ok(
-                format!("Imported {count} dish record(s) into memory."),
+                format!(
+                    "{} {count} dish record(s) into memory.",
+                    mode.past_tense_label()
+                ),
                 Some(count),
             ))
         }
         Err(error) => Json(ApiResponse::error(format!(
             "Dish CSV import failed: {error}"
+        ))),
+    }
+}
+
+/// Reloads dishes directly from `data/dishes.csv`.
+///
+/// This is the simplest practical admin workflow for the FYP demo: staff can
+/// edit the CSV file in a spreadsheet and click reload instead of pasting rows
+/// into a browser text area.
+pub async fn reload_dishes_from_file(State(state): State<WebState>) -> Json<ApiResponse<usize>> {
+    match load_dishes(DISHES_PATH) {
+        Ok(dishes) if dishes.is_empty() => {
+            Json(ApiResponse::error("data/dishes.csv contained no dishes."))
+        }
+        Ok(dishes) => {
+            let count = state.replace_dishes_from_csv(dishes);
+            Json(ApiResponse::ok(
+                format!("Reloaded {count} dish record(s) from {DISHES_PATH}."),
+                Some(count),
+            ))
+        }
+        Err(error) => Json(ApiResponse::error(format!(
+            "Reload from {DISHES_PATH} failed: {error}"
         ))),
     }
 }
@@ -112,6 +143,25 @@ pub async fn import_orders_csv(
         }
         Err(error) => Json(ApiResponse::error(format!(
             "Order CSV import failed: {error}"
+        ))),
+    }
+}
+
+/// Reloads historical orders directly from `data/orders.csv`.
+pub async fn reload_orders_from_file(State(state): State<WebState>) -> Json<ApiResponse<usize>> {
+    match load_orders(ORDERS_PATH) {
+        Ok(orders) if orders.is_empty() => {
+            Json(ApiResponse::error("data/orders.csv contained no orders."))
+        }
+        Ok(orders) => {
+            let count = state.replace_historical_orders_from_csv(orders);
+            Json(ApiResponse::ok(
+                format!("Reloaded {count} historical order record(s) from {ORDERS_PATH}."),
+                Some(count),
+            ))
+        }
+        Err(error) => Json(ApiResponse::error(format!(
+            "Reload from {ORDERS_PATH} failed: {error}"
         ))),
     }
 }
@@ -154,6 +204,30 @@ pub async fn export_orders_csv(State(state): State<WebState>) -> impl IntoRespon
     }
 }
 
+/// Downloads completed checkout orders from the current server session.
+pub async fn export_completed_session_orders_csv(
+    State(state): State<WebState>,
+) -> impl IntoResponse {
+    match orders_to_csv(&state.completed_session_orders_for_export()) {
+        Ok(csv) => (
+            [
+                (CONTENT_TYPE, "text/csv; charset=utf-8"),
+                (
+                    CONTENT_DISPOSITION,
+                    "attachment; filename=\"completed_session_orders.csv\"",
+                ),
+            ],
+            csv,
+        )
+            .into_response(),
+        Err(error) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Completed session order export failed: {error}"),
+        )
+            .into_response(),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct UpdateStatusRequest {
     pub status: String,
@@ -167,6 +241,30 @@ pub struct AvailabilityRequest {
 #[derive(Debug, Deserialize)]
 pub struct CsvImportRequest {
     pub csv: String,
+    #[serde(default)]
+    pub mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ImportMode {
+    Replace,
+    Merge,
+}
+
+impl ImportMode {
+    fn from_value(value: Option<&str>) -> Self {
+        match value.unwrap_or_default().trim().to_lowercase().as_str() {
+            "merge" => Self::Merge,
+            _ => Self::Replace,
+        }
+    }
+
+    fn past_tense_label(self) -> &'static str {
+        match self {
+            Self::Replace => "Imported",
+            Self::Merge => "Merged",
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]

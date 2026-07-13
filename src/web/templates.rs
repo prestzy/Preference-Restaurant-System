@@ -38,6 +38,7 @@ pub fn customer_menu_page(view: &MenuView) -> String {
                 <span class="search-icon">⌕</span>
                 <input id="search-input" type="search" placeholder="Search dishes, ingredients, or taste..." autocomplete="off">
             </label>
+            <div class="search-suggestions" id="search-suggestions" hidden></div>
         </section>
 
         <section class="category-strip" aria-label="Category filters">
@@ -118,7 +119,11 @@ pub fn orders_page(view: &MenuView) -> String {
         r#"
         <section class="plain-page">
             <h1>Orders</h1>
-            <p>This prototype page represents where customers would review current and past table orders.</p>
+            <p>Track the latest prototype checkout order stored in this server session.</p>
+            <div class="info-card order-status-card" id="latest-order-status">
+                <strong>No recent checkout found on this browser</strong>
+                <span>Place an order from the cart to see live status here.</span>
+            </div>
             <div class="info-card">
                 <strong>Loaded order records</strong>
                 <span>{}</span>
@@ -142,20 +147,20 @@ pub fn orders_page(view: &MenuView) -> String {
 pub fn admin_page(view: &MenuView, admin: &AdminView) -> String {
     let dashboard = admin_dashboard(admin);
     let live_orders = live_orders_table(&admin.live_orders);
+    let completed_orders = completed_orders_table(&admin.completed_session_orders);
     let historical_orders = historical_orders_table(&admin.historical_orders);
     let dish_management = dish_management_panel(&admin.dishes);
     let recommendation_tester = recommendation_tester(&admin.preference_options, &admin.dishes);
-    let csv_tools = csv_tools_panel();
 
     let content = format!(
         r#"
         <section class="plain-page admin-page">
             <h1>Admin</h1>
-            <p>Staff management tools for live orders, dishes, CSV data, and recommendation testing.</p>
+            <p>Staff management tools for live orders, dishes, recommendation testing, and order history.</p>
             {dashboard}
             {live_orders}
+            {completed_orders}
             {dish_management}
-            {csv_tools}
             {recommendation_tester}
             {historical_orders}
         </section>
@@ -185,7 +190,7 @@ fn page_shell(
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{}</title>
     <link rel="stylesheet" href="/static/app.css">
     <script>
@@ -390,6 +395,7 @@ fn admin_dashboard(admin: &AdminView) -> String {
             <div class="metric-card"><span>Unavailable</span><strong>{}</strong></div>
             <div class="metric-card"><span>Historical orders</span><strong>{}</strong></div>
             <div class="metric-card"><span>Live orders</span><strong>{}</strong></div>
+            <div class="metric-card"><span>Completed session orders</span><strong>{}</strong></div>
         </section>
         <section class="admin-two-column">
             <div class="admin-card"><h2>Most Frequent Dishes</h2>{frequent}</div>
@@ -400,7 +406,8 @@ fn admin_dashboard(admin: &AdminView) -> String {
         admin.available_dishes,
         admin.unavailable_dishes,
         admin.historical_order_count,
-        admin.live_order_count
+        admin.live_order_count,
+        admin.completed_session_order_count
     )
 }
 
@@ -424,7 +431,7 @@ fn frequency_list(values: &[crate::web::state::FrequencyView]) -> String {
 
 fn live_orders_table(live_orders: &[LiveOrder]) -> String {
     let rows = if live_orders.is_empty() {
-        r#"<tr><td colspan="5">No live customer orders yet.</td></tr>"#.to_string()
+        r#"<tr><td colspan="7">No active live customer orders yet.</td></tr>"#.to_string()
     } else {
         live_orders
             .iter()
@@ -436,7 +443,9 @@ fn live_orders_table(live_orders: &[LiveOrder]) -> String {
                         <td>{order_id}</td>
                         <td>{session}</td>
                         <td>{dishes}</td>
+                        <td>{names}</td>
                         <td>{timestamp}</td>
+                        <td>{total}</td>
                         <td>
                             <select data-order-status="{order_id}">
                                 {status_options}
@@ -447,7 +456,9 @@ fn live_orders_table(live_orders: &[LiveOrder]) -> String {
                     order_id = escape_attr(&order.order_id),
                     session = escape_html(&order.session_user_id),
                     dishes = escape_html(&order.ordered_dishes.join(", ")),
+                    names = escape_html(&order.dish_names.join(", ")),
                     timestamp = escape_html(&order.timestamp),
+                    total = escape_html(&order.total_price),
                     status_options = status_options(order.status)
                 )
             })
@@ -457,10 +468,49 @@ fn live_orders_table(live_orders: &[LiveOrder]) -> String {
     format!(
         r#"
         <section class="admin-card">
-            <div class="section-heading"><h2>Live Orders</h2><p>Orders created from customer checkout in this server session.</p></div>
+            <div class="section-heading"><h2>Live Orders</h2><p>Pending, preparing, and ready checkout orders from this server session.</p></div>
             <div class="table-wrap">
                 <table>
-                    <thead><tr><th>Order ID</th><th>Session</th><th>Dishes</th><th>Time</th><th>Status</th></tr></thead>
+                    <thead><tr><th>Order ID</th><th>Session</th><th>Dish IDs</th><th>Dish Names</th><th>Time</th><th>Total</th><th>Status</th></tr></thead>
+                    <tbody>{rows}</tbody>
+                </table>
+            </div>
+        </section>
+        "#
+    )
+}
+
+fn completed_orders_table(orders: &[LiveOrder]) -> String {
+    let rows = if orders.is_empty() {
+        r#"<tr><td colspan="6">No checkout order has been completed in this server session yet.</td></tr>"#.to_string()
+    } else {
+        orders
+            .iter()
+            .rev()
+            .map(|order| {
+                format!(
+                    r#"<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>"#,
+                    escape_html(&order.order_id),
+                    escape_html(&order.session_user_id),
+                    escape_html(&order.ordered_dishes.join(", ")),
+                    escape_html(&order.dish_names.join(", ")),
+                    escape_html(&order.timestamp),
+                    escape_html(&order.total_price)
+                )
+            })
+            .collect::<String>()
+    };
+
+    format!(
+        r#"
+        <section class="admin-card">
+            <div class="section-heading"><h2>Completed Orders This Session</h2><p>In-memory checkout orders marked Completed. These are included in collaborative filtering until the server restarts.</p></div>
+            <div class="form-actions">
+                <a class="ghost-link" href="/admin/export/completed-session-orders.csv">Export Completed Session Orders</a>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Order ID</th><th>Session</th><th>Dish IDs</th><th>Dish Names</th><th>Timestamp</th><th>Total</th></tr></thead>
                     <tbody>{rows}</tbody>
                 </table>
             </div>
@@ -486,7 +536,7 @@ fn historical_orders_table(orders: &[Order]) -> String {
     format!(
         r#"
         <section class="admin-card">
-            <div class="section-heading"><h2>Historical Orders</h2><p>CSV order logs used for co-order patterns.</p></div>
+            <div class="section-heading"><h2>Historical Orders</h2><p>Order logs loaded from data/orders.csv plus checkout orders completed during this server session.</p></div>
             <div class="table-wrap">
                 <table>
                     <thead><tr><th>Order ID</th><th>Session</th><th>Dishes</th><th>Timestamp</th></tr></thead>
@@ -576,27 +626,6 @@ fn dish_management_panel(dishes: &[DishView]) -> String {
         </section>
         "#
     )
-}
-
-fn csv_tools_panel() -> &'static str {
-    r#"
-    <section class="admin-card">
-        <div class="section-heading"><h2>CSV Tools</h2><p>Import validates CSV text and replaces the matching in-memory dataset for this demo session.</p></div>
-        <h3>Dishes CSV</h3>
-        <textarea id="dish-csv-import" rows="6" placeholder="Paste dishes.csv content here"></textarea>
-        <div class="form-actions">
-            <button class="primary-action" id="import-dishes-button" type="button">Import Dishes CSV</button>
-            <a class="ghost-link" href="/admin/export/dishes.csv">Export Dishes CSV</a>
-        </div>
-        <h3>Historical Orders CSV</h3>
-        <textarea id="order-csv-import" rows="5" placeholder="Paste orders.csv content here"></textarea>
-        <div class="form-actions">
-            <button class="primary-action" id="import-orders-button" type="button">Import Orders CSV</button>
-            <a class="ghost-link" href="/admin/export/orders.csv">Export Orders CSV</a>
-        </div>
-        <p class="status-message" id="csv-import-status"></p>
-    </section>
-    "#
 }
 
 fn recommendation_tester(options: &PreferenceOptions, dishes: &[DishView]) -> String {

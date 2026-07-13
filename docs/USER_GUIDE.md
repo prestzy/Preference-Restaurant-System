@@ -21,6 +21,7 @@ The Home page is the QR customer menu.
 Customers can:
 
 - Search by dish name, dish ID, ingredient, category, or tag.
+- View live search suggestions with dish image, category, price, and match reason.
 - Filter by category chips.
 - Select liked ingredients, disliked ingredients, and preferred tags.
 - View “Recommended for You”.
@@ -29,6 +30,24 @@ Customers can:
 - Place a prototype order.
 
 The recommendation section updates after preference chips change or cart contents change.
+
+## Live Search Suggestions
+
+Start typing in:
+
+```text
+Search dishes, ingredients, or taste...
+```
+
+The dropdown shows matching dishes immediately. Each suggestion includes:
+
+- image or placeholder
+- dish name
+- category
+- price
+- simple match reason such as `ingredient: chicken` or `tag: spicy`
+
+Click a suggestion to scroll to the matching dish card.
 
 ## Preference Chips
 
@@ -77,7 +96,7 @@ Checkout sends selected dish IDs to:
 POST /api/orders
 ```
 
-The server validates dish IDs and creates a live in-memory order.
+The server validates dish IDs and creates a live in-memory order. The latest order ID is stored in the browser so the Orders page can show the current status for this server session.
 
 ## Admin Page
 
@@ -95,7 +114,6 @@ Admin tools include:
 - live order table
 - live order status update
 - dish management
-- CSV import/export
 - recommendation testing
 - historical order table
 
@@ -111,7 +129,9 @@ The new order appears under **Live Orders**. Staff can change status:
 - Completed
 - Cancelled
 
-Live orders are in memory for the current server session.
+When staff mark an order as **Completed**, it moves out of the active Live Orders table and is added immediately to **Historical Orders** for the current server session. This also makes the completed order available as collaborative recommendation evidence.
+
+Cancelled orders remain visible in the live order table with Cancelled status. This is still in-memory prototype state, not persistent order history.
 
 ## Dish Management
 
@@ -126,18 +146,7 @@ Fields:
 - Tags
 - Image path
 
-If Dish ID is blank, the system generates the next `Dxx` ID. Use CSV export if you want to save the current in-memory dish list.
-
-## CSV Tools
-
-Admin CSV tools support:
-
-- import dishes CSV
-- export dishes CSV
-- import historical orders CSV
-- export historical orders CSV
-
-Imports replace the matching in-memory dataset for the current server session.
+If Dish ID is blank, the system generates the next `Dxx` ID. Changes are in memory for the current server session.
 
 ## Recommendation Testing
 
