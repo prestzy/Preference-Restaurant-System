@@ -1,12 +1,13 @@
-use crate::data_loader::split_csv_field;
+use crate::agent::preference_parser::{ParsedPreference, parse_preference_prompt};
+use crate::data_loader::{ORDERS_PATH, append_completed_order_to_csv, split_csv_field};
 use crate::models::{Dish, Order, RecommendationResult, UserPreference};
 use crate::preferences::{PreferenceOptions, extract_preference_options};
 use crate::recommender::hybrid::{RecommendationOutput, generate_recommendations};
+use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Local folder served by Axum under `/assets/dishes`.
 const DISH_IMAGE_DIR: &str = "assets/dishes";
@@ -23,6 +24,7 @@ pub struct WebState {
     historical_orders: Arc<RwLock<Vec<Order>>>,
     live_orders: Arc<RwLock<Vec<LiveOrder>>>,
     unavailable_dish_ids: Arc<RwLock<HashSet<String>>>,
+    order_csv_path: Arc<PathBuf>,
 }
 
 impl WebState {
@@ -33,6 +35,27 @@ impl WebState {
             historical_orders: Arc::new(RwLock::new(historical_orders)),
             live_orders: Arc::new(RwLock::new(Vec::new())),
             unavailable_dish_ids: Arc::new(RwLock::new(HashSet::new())),
+            order_csv_path: Arc::new(PathBuf::from(ORDERS_PATH)),
+        }
+    }
+
+    /// Creates web state with a custom historical order CSV path.
+    ///
+    /// Production uses `WebState::new`, which points at `data/orders.csv`.
+    /// Tests use this constructor so completion-persistence checks do not
+    /// modify the real FYP dataset.
+    #[cfg(test)]
+    fn new_with_order_csv_path(
+        dishes: Vec<Dish>,
+        historical_orders: Vec<Order>,
+        order_csv_path: PathBuf,
+    ) -> Self {
+        Self {
+            dishes: Arc::new(RwLock::new(dishes)),
+            historical_orders: Arc::new(RwLock::new(historical_orders)),
+            live_orders: Arc::new(RwLock::new(Vec::new())),
+            unavailable_dish_ids: Arc::new(RwLock::new(HashSet::new())),
+            order_csv_path: Arc::new(order_csv_path),
         }
     }
 
@@ -136,6 +159,70 @@ impl WebState {
         }
     }
 
+    /// Runs the rule-based Smart Menu Assistant.
+    ///
+    /// The assistant only converts natural language into structured
+    /// preferences. The actual ranking still uses the existing recommender, so
+    /// this feature stays lightweight and explainable instead of becoming a
+    /// separate black-box algorithm.
+    pub fn assistant_recommend(&self, request: AssistantRequest) -> AssistantResponse {
+        let dishes = self.available_dishes();
+        let parsed = parse_preference_prompt(&request.prompt, &dishes);
+        let selected_dish_ids = normalize_list(request.selected_dish_ids, true);
+        let preference = parsed.to_user_preference(selected_dish_ids.clone());
+        let orders = self.combined_orders();
+        let output = generate_recommendations(&dishes, &orders, &preference);
+
+        AssistantResponse {
+            understood: parsed.understood_summary.clone(),
+            parsed,
+            recommendations: output
+                .recommendations
+                .iter()
+                .take(8)
+                .map(|result| self.recommendation_view(result))
+                .collect(),
+            upsells: self.cart_upsells(&selected_dish_ids),
+            stats: RecommendationStatsView::from_output(&output),
+        }
+    }
+
+    /// Produces rule-based admin insights from persisted order baskets.
+    pub fn admin_insights(&self) -> AdminInsightResponse {
+        let popular = self
+            .frequent_dishes(5)
+            .into_iter()
+            .map(|item| format!("{} appeared in {} order(s).", item.label, item.count))
+            .collect::<Vec<_>>();
+        let co_order_pairs = self
+            .common_co_order_pairs(5)
+            .into_iter()
+            .map(|item| {
+                format!(
+                    "{} were ordered together {} time(s).",
+                    item.label, item.count
+                )
+            })
+            .collect::<Vec<_>>();
+        let low_exposure = self
+            .low_exposure_dishes(5)
+            .into_iter()
+            .map(|dish| {
+                format!(
+                    "{} ({}) has low exposure in order logs.",
+                    dish.name, dish.dish_id
+                )
+            })
+            .collect::<Vec<_>>();
+
+        AdminInsightResponse {
+            summary: "Insights use CSV historical orders plus completed checkout orders saved during this server session.".to_string(),
+            popular,
+            co_order_pairs,
+            low_exposure,
+        }
+    }
+
     /// Creates a live web order from checkout dish IDs.
     pub fn create_live_order(&self, dish_ids: &[String]) -> Result<LiveOrder, String> {
         let dishes = self.available_dishes();
@@ -171,10 +258,11 @@ impl WebState {
             session_user_id: "QR-CUSTOMER".to_string(),
             ordered_dishes: cleaned,
             dish_names,
-            timestamp: unix_timestamp_label(),
+            timestamp: human_timestamp_label(),
             total_price: format!("RM {total_price_amount}"),
             total_price_amount,
             status: OrderStatus::Pending,
+            historical_order_id: None,
         };
 
         live_orders.push(order.clone());
@@ -186,7 +274,39 @@ impl WebState {
         &self,
         order_id: &str,
         status: OrderStatus,
-    ) -> Result<LiveOrder, String> {
+    ) -> Result<OrderStatusUpdate, String> {
+        let previous_order = {
+            let live_orders = self.live_orders.read().expect("live orders lock poisoned");
+            live_orders
+                .iter()
+                .find(|order| order.order_id.eq_ignore_ascii_case(order_id))
+                .cloned()
+                .ok_or_else(|| format!("Live order {order_id} was not found."))?
+        };
+
+        let persisted_order = if status == OrderStatus::Completed
+            && previous_order.status != OrderStatus::Completed
+            && previous_order.historical_order_id.is_none()
+        {
+            // Completed orders become durable behavioural data. Persisting
+            // before mutating status means a disk error is visible to staff and
+            // does not silently mark an unsaved order as completed.
+            match append_completed_order_to_csv(
+                &previous_order.ordered_dishes,
+                &human_timestamp_label(),
+                self.order_csv_path.to_string_lossy().as_ref(),
+            ) {
+                Ok(order) => Some(order),
+                Err(error) => {
+                    return Err(format!(
+                        "Order was not marked Completed because saving to data/orders.csv failed: {error}"
+                    ));
+                }
+            }
+        } else {
+            None
+        };
+
         let updated_order = {
             let mut live_orders = self.live_orders.write().expect("live orders lock poisoned");
             let Some(order) = live_orders
@@ -197,14 +317,21 @@ impl WebState {
             };
 
             order.status = status;
+            if let Some(persisted_order) = &persisted_order {
+                order.historical_order_id = Some(persisted_order.order_id.clone());
+            }
             order.clone()
         };
 
-        if status == OrderStatus::Completed {
-            self.append_completed_order_to_history(&updated_order);
+        if let Some(persisted_order) = &persisted_order {
+            self.append_completed_order_to_history(persisted_order);
         }
 
-        Ok(updated_order)
+        Ok(OrderStatusUpdate {
+            order: updated_order,
+            saved_to_csv: persisted_order.is_some(),
+            historical_order_id: persisted_order.as_ref().map(|order| order.order_id.clone()),
+        })
     }
 
     /// Adds a completed checkout order to the in-memory historical order log.
@@ -212,7 +339,7 @@ impl WebState {
     /// This makes the Admin "Historical Orders" table update immediately when
     /// staff mark an order Completed. The append is guarded by `order_id` so
     /// repeated status updates do not duplicate the same order log.
-    fn append_completed_order_to_history(&self, completed_order: &LiveOrder) {
+    fn append_completed_order_to_history(&self, completed_order: &Order) {
         let mut historical_orders = self
             .historical_orders
             .write()
@@ -225,7 +352,7 @@ impl WebState {
             return;
         }
 
-        historical_orders.push(completed_order.as_order());
+        historical_orders.push(completed_order.clone());
     }
 
     /// Finds one live/session order for the customer order tracking page.
@@ -236,6 +363,17 @@ impl WebState {
             .iter()
             .find(|order| order.order_id.eq_ignore_ascii_case(order_id))
             .cloned()
+    }
+
+    /// Returns all live/session orders for the customer Orders page.
+    pub fn customer_orders(&self) -> Vec<LiveOrder> {
+        let mut orders = self
+            .live_orders
+            .read()
+            .expect("live orders lock poisoned")
+            .clone();
+        orders.reverse();
+        orders
     }
 
     /// Adds or edits a dish in memory.
@@ -505,6 +643,47 @@ impl WebState {
         labels
     }
 
+    fn cart_upsells(&self, selected_dish_ids: &[String]) -> Vec<String> {
+        if selected_dish_ids.is_empty() {
+            return Vec::new();
+        }
+
+        let context = self.dish_labels_for_ids(selected_dish_ids).join(", ");
+        let response = self.recommend(RecommendationRequest {
+            selected_dish_ids: selected_dish_ids.to_vec(),
+            ranking_method: Some("co-ordering".to_string()),
+            ..RecommendationRequest::default()
+        });
+
+        response
+            .recommendations
+            .iter()
+            .filter(|recommendation| recommendation.co_order_score > 0.0)
+            .take(3)
+            .map(|recommendation| {
+                format!(
+                    "{} is often ordered together with {}.",
+                    recommendation.dish.name, context
+                )
+            })
+            .collect()
+    }
+
+    fn low_exposure_dishes(&self, limit: usize) -> Vec<DishView> {
+        let counts = self
+            .combined_orders()
+            .into_iter()
+            .flat_map(|order| order.ordered_dishes)
+            .fold(HashMap::<String, usize>::new(), |mut counts, dish_id| {
+                *counts.entry(dish_id).or_default() += 1;
+                counts
+            });
+
+        let mut dishes = self.all_dish_views();
+        dishes.sort_by_key(|dish| counts.get(&dish.dish_id).copied().unwrap_or(0));
+        dishes.into_iter().take(limit).collect()
+    }
+
     fn frequent_dishes(&self, limit: usize) -> Vec<FrequencyView> {
         let mut counts = HashMap::<String, usize>::new();
         for order in self.combined_orders() {
@@ -538,15 +717,25 @@ impl WebState {
 
     fn common_co_order_pairs(&self, limit: usize) -> Vec<FrequencyView> {
         let mut counts = HashMap::<String, usize>::new();
+        let labels = self.dish_label_lookup();
         for order in self.combined_orders() {
             let mut ids = order.ordered_dishes;
             ids.sort();
             ids.dedup();
             for i in 0..ids.len() {
                 for j in (i + 1)..ids.len() {
-                    *counts
-                        .entry(format!("{} + {}", ids[i], ids[j]))
-                        .or_default() += 1;
+                    let pair_label = format!(
+                        "{} + {}",
+                        labels
+                            .get(&ids[i])
+                            .cloned()
+                            .unwrap_or_else(|| ids[i].clone()),
+                        labels
+                            .get(&ids[j])
+                            .cloned()
+                            .unwrap_or_else(|| ids[j].clone())
+                    );
+                    *counts.entry(pair_label).or_default() += 1;
                 }
             }
         }
@@ -558,6 +747,20 @@ impl WebState {
         values.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.label.cmp(&b.label)));
         values.truncate(limit);
         values
+    }
+
+    fn dish_label_lookup(&self) -> HashMap<String, String> {
+        self.dishes
+            .read()
+            .expect("dishes lock poisoned")
+            .iter()
+            .map(|dish| {
+                (
+                    dish.dish_id.clone(),
+                    format!("{} ({})", dish.name, dish.dish_id),
+                )
+            })
+            .collect()
     }
 }
 
@@ -649,8 +852,11 @@ pub struct RecommendationView {
 #[derive(Debug, Clone, Serialize)]
 pub struct RecommendationStatsView {
     pub filtered_dishes: usize,
+    pub eligible_dishes: usize,
+    pub matched_preferences: usize,
     pub excluded_due_to_disliked: usize,
     pub skipped_selected_dishes: usize,
+    pub recommended_shown: usize,
     pub diversity_count_top_5: usize,
 }
 
@@ -658,8 +864,11 @@ impl RecommendationStatsView {
     fn from_output(output: &RecommendationOutput) -> Self {
         Self {
             filtered_dishes: output.stats.filtered_dishes,
+            eligible_dishes: output.stats.filtered_dishes,
+            matched_preferences: output.stats.matched_preference_dishes,
             excluded_due_to_disliked: output.stats.excluded_due_to_disliked,
             skipped_selected_dishes: output.stats.skipped_selected_dishes,
+            recommended_shown: output.recommendations.len().min(10),
             diversity_count_top_5: output.stats.diversity_count_top_5,
         }
     }
@@ -702,6 +911,33 @@ pub struct RecommendationApiResponse {
     pub stats: RecommendationStatsView,
 }
 
+/// JSON request accepted by the Smart Menu Assistant endpoint.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AssistantRequest {
+    pub prompt: String,
+    #[serde(default)]
+    pub selected_dish_ids: Vec<String>,
+}
+
+/// JSON response returned by the Smart Menu Assistant endpoint.
+#[derive(Debug, Clone, Serialize)]
+pub struct AssistantResponse {
+    pub understood: String,
+    pub parsed: ParsedPreference,
+    pub recommendations: Vec<RecommendationView>,
+    pub upsells: Vec<String>,
+    pub stats: RecommendationStatsView,
+}
+
+/// Lightweight admin insight response calculated from order history.
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminInsightResponse {
+    pub summary: String,
+    pub popular: Vec<String>,
+    pub co_order_pairs: Vec<String>,
+    pub low_exposure: Vec<String>,
+}
+
 /// Live session order created by customer checkout.
 #[derive(Debug, Clone, Serialize)]
 pub struct LiveOrder {
@@ -713,6 +949,7 @@ pub struct LiveOrder {
     pub total_price: String,
     pub total_price_amount: u32,
     pub status: OrderStatus,
+    pub historical_order_id: Option<String>,
 }
 
 impl LiveOrder {
@@ -724,6 +961,17 @@ impl LiveOrder {
             timestamp: self.timestamp.clone(),
         }
     }
+}
+
+/// Result returned after staff update a live order status.
+///
+/// `saved_to_csv` is true only when this status update appended a new historical
+/// row to `data/orders.csv`.
+#[derive(Debug, Clone, Serialize)]
+pub struct OrderStatusUpdate {
+    pub order: LiveOrder,
+    pub saved_to_csv: bool,
+    pub historical_order_id: Option<String>,
 }
 
 /// Staff-visible status for live orders.
@@ -935,17 +1183,24 @@ fn next_dish_id(dishes: &[Dish]) -> String {
     format!("D{next_number:02}")
 }
 
-fn unix_timestamp_label() -> String {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or_default();
-    format!("unix:{seconds}")
+fn human_timestamp_label() -> String {
+    Local::now().format("%Y-%m-%d %H:%M").to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data_loader::load_orders;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_order_csv_path(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be valid")
+            .as_nanos();
+        std::env::temp_dir().join(format!("fyp_web_state_{label}_{unique}.csv"))
+    }
 
     fn dish(id: &str, name: &str, category: &str, ingredients: &[&str], tags: &[&str]) -> Dish {
         Dish {
@@ -1058,6 +1313,85 @@ mod tests {
     }
 
     #[test]
+    fn admin_co_order_pairs_include_dish_names() {
+        let dishes = vec![
+            dish("D01", "Nasi Lemak", "main", &["rice"], &["signature"]),
+            dish("D02", "Chicken Satay", "main", &["chicken"], &["grilled"]),
+        ];
+        let orders = vec![Order {
+            order_id: "O001".to_string(),
+            session_user_id: "U01".to_string(),
+            ordered_dishes: vec!["D01".to_string(), "D02".to_string()],
+            timestamp: "2026-01-01 12:30".to_string(),
+        }];
+        let state = WebState::new(dishes, orders);
+
+        let pairs = state.admin_view().co_order_pairs;
+
+        assert_eq!(pairs[0].label, "Nasi Lemak (D01) + Chicken Satay (D02)");
+        assert_eq!(pairs[0].count, 1);
+    }
+
+    #[test]
+    fn completed_order_updates_collaborative_recommendations_immediately() {
+        let dishes = vec![
+            dish("D01", "Nasi Lemak", "main", &["rice"], &["signature"]),
+            dish("D02", "Chicken Satay", "main", &["chicken"], &["grilled"]),
+        ];
+        let csv_path = temp_order_csv_path("completed_recommendation");
+        let state = WebState::new_with_order_csv_path(dishes, Vec::new(), csv_path.clone());
+        let order = state
+            .create_live_order(&["D01".to_string(), "D02".to_string()])
+            .unwrap();
+
+        state
+            .update_order_status(&order.order_id, OrderStatus::Completed)
+            .unwrap();
+        let response = state.recommend(RecommendationRequest {
+            selected_dish_ids: vec!["D01".to_string()],
+            ranking_method: Some("co-ordering".to_string()),
+            ..RecommendationRequest::default()
+        });
+        let _ = fs::remove_file(&csv_path);
+
+        assert_eq!(response.recommendations[0].dish.dish_id, "D02");
+        assert!(response.recommendations[0].co_order_score > 0.0);
+    }
+
+    #[test]
+    fn assistant_recommendations_exclude_negated_menu_terms() {
+        let dishes = vec![
+            dish("D01", "Beef Satay", "main", &["beef"], &["grilled"]),
+            dish(
+                "D02",
+                "Chicken Rice",
+                "main",
+                &["chicken", "rice"],
+                &["signature"],
+            ),
+        ];
+        let state = WebState::new(dishes, Vec::new());
+
+        let response = state.assistant_recommend(AssistantRequest {
+            prompt: "I want chicken but no beef".to_string(),
+            selected_dish_ids: Vec::new(),
+        });
+
+        assert!(
+            response
+                .parsed
+                .disliked_ingredients
+                .contains(&"beef".to_string())
+        );
+        assert!(
+            response
+                .recommendations
+                .iter()
+                .all(|recommendation| recommendation.dish.dish_id != "D01")
+        );
+    }
+
+    #[test]
     fn updating_live_order_status_changes_admin_view() {
         let dishes = vec![dish(
             "D01",
@@ -1082,23 +1416,44 @@ mod tests {
             dish("D01", "Nasi Lemak", "main", &["rice"], &["signature"]),
             dish("D02", "Satay", "main", &["chicken"], &["grilled"]),
         ];
-        let state = WebState::new(dishes, Vec::new());
+        let csv_path = temp_order_csv_path("completed_order");
+        let state = WebState::new_with_order_csv_path(dishes, Vec::new(), csv_path.clone());
         let order = state
             .create_live_order(&["D01".to_string(), "D02".to_string()])
             .unwrap();
 
-        state
+        let update = state
+            .update_order_status(&order.order_id, OrderStatus::Completed)
+            .unwrap();
+        let duplicate_update = state
             .update_order_status(&order.order_id, OrderStatus::Completed)
             .unwrap();
 
         let admin = state.admin_view();
+        let reloaded_orders =
+            load_orders(csv_path.to_str().unwrap()).expect("completed order should reload");
+        let raw = fs::read_to_string(&csv_path).expect("CSV should be readable");
+        let _ = fs::remove_file(&csv_path);
+
+        assert!(update.saved_to_csv);
+        assert_eq!(update.historical_order_id.as_deref(), Some("O001"));
+        assert!(!duplicate_update.saved_to_csv);
         assert!(admin.live_orders.is_empty());
         assert_eq!(admin.completed_session_orders.len(), 1);
         assert_eq!(
             admin.completed_session_orders[0].dish_names,
             vec!["Nasi Lemak", "Satay"]
         );
-        assert_eq!(admin.historical_orders[0].order_id, order.order_id);
+        assert_eq!(admin.historical_orders[0].order_id, "O001");
+        assert_eq!(admin.historical_orders[0].session_user_id, "U1");
+        assert_eq!(reloaded_orders.len(), 1);
+        assert_eq!(reloaded_orders[0].order_id, "O001");
+        assert_eq!(reloaded_orders[0].session_user_id, "U1");
+        assert_eq!(reloaded_orders[0].ordered_dishes, vec!["D01", "D02"]);
+        assert_eq!(raw.matches("O001").count(), 1);
+        assert!(!raw.contains("WEB"));
+        assert!(!raw.contains("QR-CUSTOMER"));
+        assert!(!raw.contains("unix:"));
         assert!(
             state.completed_session_orders_for_export()[0]
                 .ordered_dishes

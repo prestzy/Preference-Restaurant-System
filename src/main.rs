@@ -1,3 +1,4 @@
+mod agent;
 mod data_loader;
 mod models;
 #[allow(dead_code)]

@@ -46,6 +46,25 @@ function recommendationByDishId(dishId) {
   return (window.RECOMMENDATIONS || []).find((item) => item.dish.dish_id === dishId);
 }
 
+function shortRecommendationReason(recommendation) {
+  const parts = [];
+  const liked = [...(recommendation.matched_liked_ingredients || [])];
+  const tags = [...(recommendation.matched_preferred_tags || [])];
+  if (liked.length || tags.length) {
+    parts.push(`Matches ${formatList([...liked, ...tags].slice(0, 3))}`);
+  }
+  if ((recommendation.related_selected_dishes || []).length) {
+    parts.push(`Often ordered with ${recommendation.related_selected_dishes[0]}`);
+  }
+  if (recommendation.popularity_score > 0 && !parts.length) {
+    parts.push("Popular from order history");
+  }
+  if (recommendation.business_rule_score > 0 && parts.length < 2) {
+    parts.push("Fits the menu context");
+  }
+  return parts.length ? parts.join(" · ") : "Based on ingredients and order patterns";
+}
+
 function parsePriceAmount(dish) {
   return Number(dish?.price_amount || 0);
 }
@@ -180,6 +199,62 @@ function setupMenuFiltering() {
   });
 
   applyFilters();
+}
+
+function setupCarouselControls() {
+  document.querySelectorAll("[data-carousel-scroll]").forEach((button) => {
+    const row = document.getElementById(button.dataset.carouselScroll);
+    if (!row || button.dataset.carouselBound === "true") {
+      return;
+    }
+    button.dataset.carouselBound = "true";
+
+    const updateDisabledState = () => {
+      const controls = document.querySelectorAll(
+        `[data-carousel-scroll="${CSS.escape(button.dataset.carouselScroll)}"]`
+      );
+      const maxScroll = row.scrollWidth - row.clientWidth - 2;
+      controls.forEach((control) => {
+        const direction = Number(control.dataset.direction || 1);
+        control.disabled =
+          maxScroll <= 0 ||
+          (direction < 0 && row.scrollLeft <= 2) ||
+          (direction > 0 && row.scrollLeft >= maxScroll);
+      });
+    };
+
+    button.addEventListener("click", () => {
+      const direction = Number(button.dataset.direction || 1);
+      row.scrollBy({
+        left: direction * Math.max(220, Math.floor(row.clientWidth * 0.8)),
+        behavior: "smooth",
+      });
+      window.setTimeout(updateDisabledState, 280);
+    });
+    row.addEventListener("scroll", updateDisabledState, { passive: true });
+    window.addEventListener("resize", updateDisabledState);
+    updateDisabledState();
+  });
+}
+
+function setupOrderFilters() {
+  const cards = Array.from(document.querySelectorAll("[data-order-status-card]"));
+  if (!cards.length) {
+    return;
+  }
+
+  document.querySelectorAll("[data-order-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      document
+        .querySelectorAll("[data-order-filter]")
+        .forEach((item) => item.classList.remove("active"));
+      button.classList.add("active");
+      const filter = button.dataset.orderFilter;
+      cards.forEach((card) => {
+        card.hidden = filter !== "all" && card.dataset.orderStatusCard !== filter;
+      });
+    });
+  });
 }
 
 function renderSearchSuggestions(terms, container) {
@@ -355,6 +430,7 @@ async function refreshCustomerRecommendations() {
     applyRecommendationBadges();
     setupCartButtons();
     setupDetailButtons();
+    window.dispatchEvent(new Event("resize"));
   } catch {
     row.innerHTML = `<div class="info-card slim"><strong>Recommendation refresh failed</strong><span>Please try again.</span></div>`;
   }
@@ -368,7 +444,7 @@ function renderRecommendationCard(recommendation) {
       <div class="card-body">
         <h3>${escapeHtml(dish.name)}</h3>
         <p>${escapeHtml(dish.category)}</p>
-        <span class="reason">${escapeHtml(recommendation.explanation)}</span>
+        <span class="reason">${escapeHtml(shortRecommendationReason(recommendation))}</span>
         <strong>${escapeHtml(dish.price)}</strong>
         <div class="card-actions">
           <button class="add-button" data-add-cart="${escapeHtml(dish.dish_id)}" type="button">Add</button>
@@ -385,11 +461,19 @@ function renderRecommendationStats(stats) {
     return;
   }
 
+  const matched = Number(stats.matched_preferences || 0);
+  const shown = Number(stats.recommended_shown || (window.RECOMMENDATIONS || []).length);
+  const fallback =
+    matched === 0 && shown > 0
+      ? `<span>No exact preference match found. Showing popular alternatives.</span>`
+      : "";
   target.innerHTML = `
-    <span>Filtered: <strong>${stats.filtered_dishes}</strong></span>
+    <span>Eligible dishes: <strong>${stats.eligible_dishes ?? stats.filtered_dishes}</strong></span>
+    <span>Matched preferences: <strong>${matched}</strong></span>
     <span>Excluded disliked: <strong>${stats.excluded_due_to_disliked}</strong></span>
     <span>Skipped cart dishes: <strong>${stats.skipped_selected_dishes}</strong></span>
-    <span>Top-5 category diversity: <strong>${stats.diversity_count_top_5}</strong></span>
+    <span>Recommended shown: <strong>${shown}</strong></span>
+    ${fallback}
   `;
 }
 
@@ -573,13 +657,78 @@ function setupCheckout() {
   });
 }
 
+function setupSmartMenuAssistant() {
+  const prompt = document.getElementById("assistant-prompt");
+  const button = document.getElementById("assistant-run");
+  const understood = document.getElementById("assistant-understood");
+  const upsells = document.getElementById("assistant-upsells");
+  const row = document.getElementById("recommended-row");
+  if (!prompt || !button || !understood || !row) {
+    return;
+  }
+
+  const runAssistant = async () => {
+    const text = prompt.value.trim();
+    if (!text) {
+      understood.textContent = "Type a preference first, for example: spicy chicken but no beef.";
+      return;
+    }
+
+    button.disabled = true;
+    understood.textContent = "Understanding your request...";
+    try {
+      const response = await fetch("/api/assistant/recommendations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: text,
+          selected_dish_ids: Object.keys(readCart()),
+        }),
+      });
+      const result = await response.json();
+      understood.textContent = result.understood || "Assistant could not match menu terms.";
+      window.RECOMMENDATIONS = result.recommendations || [];
+      row.innerHTML = window.RECOMMENDATIONS.length
+        ? window.RECOMMENDATIONS.map(renderRecommendationCard).join("")
+        : `<div class="info-card slim"><strong>No assistant recommendations</strong><span>Try menu words such as chicken, rice, spicy, dessert, or no beef.</span></div>`;
+      if (upsells) {
+        upsells.innerHTML = (result.upsells || []).length
+          ? (result.upsells || [])
+              .map((item) => `<span class="assistant-pill">${escapeHtml(item)}</span>`)
+              .join("")
+          : "";
+      }
+      renderRecommendationStats(result.stats);
+      applyRecommendationBadges();
+      setupCartButtons();
+      setupDetailButtons();
+      window.dispatchEvent(new Event("resize"));
+    } catch {
+      understood.textContent = "Assistant request failed. Please try again.";
+    } finally {
+      button.disabled = false;
+    }
+  };
+
+  button.addEventListener("click", runAssistant);
+  prompt.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      runAssistant();
+    }
+  });
+}
+
 function setupAdminTools() {
   setupAdminOrderStatus();
   setupDishManagement();
+  setupCsvTools();
   setupAdminRecommendationTester();
+  setupAdminInsights();
 }
 
 function setupAdminOrderStatus() {
+  const statusMessage = document.getElementById("admin-order-status");
   document.querySelectorAll("[data-order-status]").forEach((select) => {
     select.addEventListener("change", async () => {
       const orderId = select.dataset.orderStatus;
@@ -589,11 +738,14 @@ function setupAdminOrderStatus() {
         body: JSON.stringify({ status: select.value }),
       });
       const result = await response.json();
+      if (statusMessage) {
+        statusMessage.textContent = result.message || "";
+      }
       if (result.ok && (select.value === "Completed" || select.value === "Cancelled")) {
-        // Completed/cancelled orders leave the active live-order table. Reloading
-        // keeps the admin view honest and makes the completed-session section
-        // update immediately without pretending persistence exists.
-        window.setTimeout(() => window.location.reload(), 400);
+        // Completed orders are now written into data/orders.csv before this
+        // success path returns. Reloading refreshes both the active table and
+        // the historical table so staff see the persisted order immediately.
+        window.setTimeout(() => window.location.reload(), 900);
       }
     });
   });
@@ -847,6 +999,7 @@ async function setupCustomerOrderStatus() {
 function setupAdminRecommendationTester() {
   const button = document.getElementById("run-admin-recommendations");
   const tableBody = document.getElementById("admin-recommendation-results");
+  const statsTarget = document.getElementById("admin-recommendation-stats");
   if (!button || !tableBody) {
     return;
   }
@@ -879,17 +1032,68 @@ function setupAdminRecommendationTester() {
     tableBody.innerHTML = rows.length
       ? rows.join("")
       : `<tr><td colspan="11">No recommendation evidence for this test input.</td></tr>`;
+    if (statsTarget && result.stats) {
+      statsTarget.innerHTML = `
+        <span>Eligible dishes: <strong>${result.stats.eligible_dishes ?? result.stats.filtered_dishes}</strong></span>
+        <span>Matched preferences: <strong>${result.stats.matched_preferences || 0}</strong></span>
+        <span>Excluded disliked: <strong>${result.stats.excluded_due_to_disliked}</strong></span>
+        <span>Skipped selected: <strong>${result.stats.skipped_selected_dishes}</strong></span>
+        <span>Recommended shown: <strong>${result.stats.recommended_shown || rows.length}</strong></span>
+        <span>Top-5 diversity: <strong>${result.stats.diversity_count_top_5}</strong></span>
+      `;
+    }
   });
+}
+
+function setupAdminInsights() {
+  const summary = document.getElementById("admin-insight-summary");
+  const grid = document.getElementById("admin-insight-grid");
+  const refresh = document.getElementById("refresh-admin-insights");
+  if (!summary || !grid) {
+    return;
+  }
+
+  const renderList = (title, values) => `
+    <div class="insight-card">
+      <strong>${escapeHtml(title)}</strong>
+      ${
+        values && values.length
+          ? `<ul>${values.map((value) => `<li>${escapeHtml(value)}</li>`).join("")}</ul>`
+          : `<p class="muted">No data yet.</p>`
+      }
+    </div>
+  `;
+
+  const loadInsights = async () => {
+    summary.textContent = "Loading insights...";
+    try {
+      const response = await fetch("/api/admin/insights");
+      const result = await response.json();
+      summary.textContent = result.summary || "";
+      grid.innerHTML =
+        renderList("Popular dishes", result.popular || []) +
+        renderList("Co-order patterns", result.co_order_pairs || []) +
+        renderList("Low exposure dishes", result.low_exposure || []);
+    } catch {
+      summary.textContent = "Unable to load insight summary.";
+    }
+  };
+
+  refresh?.addEventListener("click", loadInsights);
+  loadInsights();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   updateCartCount();
   setupMenuFiltering();
+  setupCarouselControls();
+  setupOrderFilters();
   setupPreferencePanels();
   setupCartButtons();
   setupDetailButtons();
   renderCartPage();
   setupCheckout();
+  setupSmartMenuAssistant();
   setupAdminTools();
   setupCustomerOrderStatus();
   refreshCustomerRecommendations();

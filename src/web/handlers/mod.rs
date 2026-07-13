@@ -5,6 +5,7 @@
 //! them to route declaration or `main.rs`.
 
 pub mod admin;
+pub mod assistant;
 pub mod cart;
 pub mod menu;
 pub mod orders;

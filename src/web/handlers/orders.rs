@@ -11,7 +11,8 @@ use serde::Serialize;
 /// recommendation code.
 pub async fn orders_page(State(state): State<WebState>) -> Html<String> {
     let view = state.menu_view();
-    Html(templates::orders_page(&view))
+    let orders = state.customer_orders();
+    Html(templates::orders_page(&view, &orders))
 }
 
 /// Returns one in-memory checkout order for customer-side status tracking.

@@ -15,10 +15,26 @@ pub fn router(state: WebState) -> Router {
         .route("/cart", get(handlers::cart::cart_page))
         .route("/orders", get(handlers::orders::orders_page))
         .route("/admin", get(handlers::admin::admin_page))
+        .route("/admin/orders", get(handlers::admin::admin_orders_page))
+        .route("/admin/dishes", get(handlers::admin::admin_dishes_page))
+        .route(
+            "/admin/recommendations",
+            get(handlers::admin::admin_recommendations_page),
+        )
+        .route("/admin/data", get(handlers::admin::admin_data_page))
+        .route("/admin/insights", get(handlers::admin::admin_insights_page))
         .route("/api/orders", post(handlers::cart::create_order))
         .route(
             "/api/recommendations",
             post(handlers::recommendations::recommendations),
+        )
+        .route(
+            "/api/assistant/recommendations",
+            post(handlers::assistant::smart_menu_assistant),
+        )
+        .route(
+            "/api/admin/insights",
+            get(handlers::assistant::admin_insights),
         )
         .route(
             "/api/admin/orders/:order_id/status",

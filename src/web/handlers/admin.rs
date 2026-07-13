@@ -2,7 +2,7 @@ use crate::data_loader::{
     DISHES_PATH, ORDERS_PATH, dishes_to_csv, load_dishes, load_orders, orders_to_csv,
     parse_dishes_from_reader, parse_orders_from_reader,
 };
-use crate::web::state::{DishView, LiveOrder, OrderStatus, UpsertDishRequest, WebState};
+use crate::web::state::{DishView, OrderStatus, OrderStatusUpdate, UpsertDishRequest, WebState};
 use crate::web::templates;
 use axum::Json;
 use axum::extract::{Path, State};
@@ -21,18 +21,63 @@ pub async fn admin_page(State(state): State<WebState>) -> Html<String> {
     Html(templates::admin_page(&view, &admin))
 }
 
+pub async fn admin_orders_page(State(state): State<WebState>) -> Html<String> {
+    let view = state.menu_view();
+    let admin = state.admin_view();
+    Html(templates::admin_orders_page(&view, &admin))
+}
+
+pub async fn admin_dishes_page(State(state): State<WebState>) -> Html<String> {
+    let view = state.menu_view();
+    let admin = state.admin_view();
+    Html(templates::admin_dishes_page(&view, &admin))
+}
+
+pub async fn admin_recommendations_page(State(state): State<WebState>) -> Html<String> {
+    let view = state.menu_view();
+    let admin = state.admin_view();
+    Html(templates::admin_recommendations_page(&view, &admin))
+}
+
+pub async fn admin_data_page(State(state): State<WebState>) -> Html<String> {
+    let view = state.menu_view();
+    Html(templates::admin_data_page(&view))
+}
+
+pub async fn admin_insights_page(State(state): State<WebState>) -> Html<String> {
+    let view = state.menu_view();
+    let admin = state.admin_view();
+    Html(templates::admin_insights_page(&view, &admin))
+}
+
 /// Updates the workflow status for a live customer checkout order.
 pub async fn update_order_status(
     State(state): State<WebState>,
     Path(order_id): Path<String>,
     Json(payload): Json<UpdateStatusRequest>,
-) -> Json<ApiResponse<LiveOrder>> {
+) -> Json<ApiResponse<OrderStatusUpdate>> {
     let Some(status) = OrderStatus::from_label(&payload.status) else {
         return Json(ApiResponse::error("Unknown order status."));
     };
 
     match state.update_order_status(&order_id, status) {
-        Ok(order) => Json(ApiResponse::ok("Order status updated.", Some(order))),
+        Ok(update) => {
+            let message = if update.saved_to_csv {
+                format!(
+                    "Order marked Completed and saved to data/orders.csv as {}.",
+                    update
+                        .historical_order_id
+                        .as_deref()
+                        .unwrap_or("a historical order")
+                )
+            } else if status == OrderStatus::Completed {
+                "Order marked Completed. This live order was already saved to data/orders.csv."
+                    .to_string()
+            } else {
+                "Order status updated.".to_string()
+            };
+            Json(ApiResponse::ok(message, Some(update)))
+        }
         Err(message) => Json(ApiResponse::error(message)),
     }
 }

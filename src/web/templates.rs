@@ -41,6 +41,21 @@ pub fn customer_menu_page(view: &MenuView) -> String {
             <div class="search-suggestions" id="search-suggestions" hidden></div>
         </section>
 
+        <section class="assistant-card" aria-labelledby="assistant-title">
+            <div class="section-heading compact-heading">
+                <div>
+                    <h2 id="assistant-title">Smart Menu Assistant</h2>
+                    <p>Tell us what you feel like eating. Example: spicy chicken but no beef.</p>
+                </div>
+            </div>
+            <div class="assistant-input-row">
+                <input id="assistant-prompt" type="text" placeholder="Tell us what you feel like eating, e.g. spicy chicken but no beef">
+                <button class="primary-action" id="assistant-run" type="button">Ask</button>
+            </div>
+            <p class="assistant-understood" id="assistant-understood"></p>
+            <div class="assistant-upsells" id="assistant-upsells"></div>
+        </section>
+
         <section class="category-strip" aria-label="Category filters">
             {category_chips}
         </section>
@@ -52,6 +67,10 @@ pub fn customer_menu_page(view: &MenuView) -> String {
                 <div>
                     <h2 id="recommended-title">Recommended for You</h2>
                     <p>Based on your preferences and ordering patterns</p>
+                </div>
+                <div class="carousel-controls" aria-label="Recommended dish carousel controls">
+                    <button class="carousel-arrow" type="button" data-carousel-scroll="recommended-row" data-direction="-1" aria-label="Scroll recommendations left">‹</button>
+                    <button class="carousel-arrow" type="button" data-carousel-scroll="recommended-row" data-direction="1" aria-label="Scroll recommendations right">›</button>
                 </div>
             </div>
             <div class="recommended-row" id="recommended-row">
@@ -114,18 +133,28 @@ pub fn cart_page(view: &MenuView) -> String {
 }
 
 /// Renders a simple customer orders placeholder page.
-pub fn orders_page(view: &MenuView) -> String {
+pub fn orders_page(view: &MenuView, orders: &[LiveOrder]) -> String {
+    let order_cards = if orders.is_empty() {
+        r#"<div class="info-card"><strong>No current orders yet.</strong><span>Place an order from the cart to track it here.</span></div>"#.to_string()
+    } else {
+        orders.iter().map(order_card).collect::<String>()
+    };
     let content = format!(
         r#"
         <section class="plain-page">
             <h1>Orders</h1>
-            <p>Track the latest prototype checkout order stored in this server session.</p>
-            <div class="info-card order-status-card" id="latest-order-status">
-                <strong>No recent checkout found on this browser</strong>
-                <span>Place an order from the cart to see live status here.</span>
-            </div>
-            <div class="info-card">
-                <strong>Loaded order records</strong>
+            <p>Track checkout orders from this server session.</p>
+            <section class="order-filter-row" aria-label="Order status filters">
+                <button class="chip active" type="button" data-order-filter="all">All</button>
+                <button class="chip" type="button" data-order-filter="pending">Pending</button>
+                <button class="chip" type="button" data-order-filter="preparing">Preparing</button>
+                <button class="chip" type="button" data-order-filter="ready">Ready</button>
+                <button class="chip" type="button" data-order-filter="completed">Completed</button>
+                <button class="chip" type="button" data-order-filter="cancelled">Cancelled</button>
+            </section>
+            <div class="order-card-list" id="orders-list">{order_cards}</div>
+            <div class="info-card slim">
+                <strong>Historical order records loaded</strong>
                 <span>{}</span>
             </div>
         </section>
@@ -143,32 +172,181 @@ pub fn orders_page(view: &MenuView) -> String {
     )
 }
 
+fn order_card(order: &LiveOrder) -> String {
+    format!(
+        r#"
+        <article class="order-card" data-order-status-card="{status_lower}">
+            <div class="order-card-main">
+                <div>
+                    <p class="eyebrow">{order_id}</p>
+                    <h2>{status_badge} {total}</h2>
+                </div>
+                <span class="status-badge {status_lower}">{status}</span>
+            </div>
+            <p><strong>Dishes:</strong> {dish_names}</p>
+            <p><strong>Dish IDs:</strong> {dish_ids}</p>
+            <p><strong>Time:</strong> {timestamp}</p>
+        </article>
+        "#,
+        order_id = escape_html(&order.order_id),
+        status = order.status.label(),
+        status_lower = order.status.label().to_lowercase(),
+        status_badge = escape_html(order.status.label()),
+        total = escape_html(&order.total_price),
+        dish_names = escape_html(&order.dish_names.join(", ")),
+        dish_ids = escape_html(&order.ordered_dishes.join(", ")),
+        timestamp = escape_html(&order.timestamp)
+    )
+}
+
 /// Renders the staff/admin dashboard and management page.
 pub fn admin_page(view: &MenuView, admin: &AdminView) -> String {
     let dashboard = admin_dashboard(admin);
-    let live_orders = live_orders_table(&admin.live_orders);
-    let completed_orders = completed_orders_table(&admin.completed_session_orders);
-    let historical_orders = historical_orders_table(&admin.historical_orders);
-    let dish_management = dish_management_panel(&admin.dishes);
-    let recommendation_tester = recommendation_tester(&admin.preference_options, &admin.dishes);
 
     let content = format!(
         r#"
         <section class="plain-page admin-page">
             <h1>Admin</h1>
-            <p>Staff management tools for live orders, dishes, recommendation testing, and order history.</p>
+            <p>Dashboard overview for the QR ordering and recommendation prototype.</p>
+            {}
             {dashboard}
-            {live_orders}
-            {completed_orders}
-            {dish_management}
-            {recommendation_tester}
-            {historical_orders}
         </section>
-        "#
+        "#,
+        admin_section_nav("dashboard")
     );
 
     page_shell(
         "Admin",
+        "admin",
+        &content,
+        &view.dishes_json,
+        &view.recommendations_json,
+        &view.preference_options_json,
+    )
+}
+
+pub fn admin_orders_page(view: &MenuView, admin: &AdminView) -> String {
+    let content = format!(
+        r#"
+        <section class="plain-page admin-page">
+            <h1>Admin Orders</h1>
+            <p>Manage live checkout orders and review saved historical order baskets.</p>
+            {}
+            {}
+            {}
+            {}
+        </section>
+        "#,
+        admin_section_nav("orders"),
+        live_orders_table(&admin.live_orders),
+        completed_orders_table(&admin.completed_session_orders),
+        historical_orders_table(&admin.historical_orders)
+    );
+
+    page_shell(
+        "Admin Orders",
+        "admin",
+        &content,
+        &view.dishes_json,
+        &view.recommendations_json,
+        &view.preference_options_json,
+    )
+}
+
+pub fn admin_dishes_page(view: &MenuView, admin: &AdminView) -> String {
+    let content = format!(
+        r#"
+        <section class="plain-page admin-page">
+            <h1>Dish Management</h1>
+            <p>Add, edit, hide, and review dishes used by the customer menu.</p>
+            {}
+            {}
+        </section>
+        "#,
+        admin_section_nav("dishes"),
+        dish_management_panel(&admin.dishes)
+    );
+
+    page_shell(
+        "Admin Dishes",
+        "admin",
+        &content,
+        &view.dishes_json,
+        &view.recommendations_json,
+        &view.preference_options_json,
+    )
+}
+
+pub fn admin_recommendations_page(view: &MenuView, admin: &AdminView) -> String {
+    let content = format!(
+        r#"
+        <section class="plain-page admin-page">
+            <h1>Recommendation Tester</h1>
+            <p>Academic scoring view for content, co-ordering, popularity, time boost, and association metrics.</p>
+            {}
+            {}
+        </section>
+        "#,
+        admin_section_nav("recommendations"),
+        recommendation_tester(&admin.preference_options, &admin.dishes)
+    );
+
+    page_shell(
+        "Admin Recommendations",
+        "admin",
+        &content,
+        &view.dishes_json,
+        &view.recommendations_json,
+        &view.preference_options_json,
+    )
+}
+
+pub fn admin_data_page(view: &MenuView) -> String {
+    let content = format!(
+        r#"
+        <section class="plain-page admin-page">
+            <h1>CSV / Data Tools</h1>
+            <p>Reload, import, preview, and export the CSV files used by this prototype.</p>
+            {}
+            {}
+        </section>
+        "#,
+        admin_section_nav("data"),
+        csv_data_tools_panel()
+    );
+
+    page_shell(
+        "Admin Data",
+        "admin",
+        &content,
+        &view.dishes_json,
+        &view.recommendations_json,
+        &view.preference_options_json,
+    )
+}
+
+pub fn admin_insights_page(view: &MenuView, admin: &AdminView) -> String {
+    let content = format!(
+        r#"
+        <section class="plain-page admin-page">
+            <h1>Insights</h1>
+            <p>Popularity, co-order patterns, and rule-based Smart Menu insights.</p>
+            {}
+            {}
+            <section class="admin-two-column">
+                <div class="admin-card"><h2>Most Frequent Dishes</h2>{}</div>
+                <div class="admin-card"><h2>Common Co-order Pairs</h2>{}</div>
+            </section>
+        </section>
+        "#,
+        admin_section_nav("insights"),
+        admin_insight_panel(),
+        frequency_list(&admin.frequent_dishes),
+        frequency_list(&admin.co_order_pairs)
+    );
+
+    page_shell(
+        "Admin Insights",
         "admin",
         &content,
         &view.dishes_json,
@@ -250,6 +428,34 @@ fn preference_panel(options: &PreferenceOptions, scope: &str) -> String {
     )
 }
 
+fn admin_section_nav(active: &str) -> String {
+    let links = [
+        ("dashboard", "Dashboard", "/admin"),
+        ("orders", "Orders", "/admin/orders"),
+        ("dishes", "Dishes", "/admin/dishes"),
+        (
+            "recommendations",
+            "Recommendation Tester",
+            "/admin/recommendations",
+        ),
+        ("data", "CSV / Data", "/admin/data"),
+        ("insights", "Insights", "/admin/insights"),
+    ];
+    let items = links
+        .iter()
+        .map(|(id, label, href)| {
+            format!(
+                r#"<a class="admin-nav-link{}" href="{}">{}</a>"#,
+                if *id == active { " active" } else { "" },
+                escape_attr(href),
+                escape_html(label)
+            )
+        })
+        .collect::<String>();
+
+    format!(r#"<nav class="admin-section-nav">{items}</nav>"#)
+}
+
 fn preference_group(title: &str, help: &str, kind: &str, values: &[String]) -> String {
     let chips = values
         .iter()
@@ -297,9 +503,41 @@ fn recommended_card(recommendation: &RecommendationView) -> String {
         dish_id = escape_attr(&dish.dish_id),
         name = escape_html(&dish.name),
         category = escape_html(&dish.category),
-        reason = escape_html(&recommendation.explanation),
+        reason = escape_html(&short_recommendation_reason(recommendation)),
         price = escape_html(&dish.price)
     )
+}
+
+fn short_recommendation_reason(recommendation: &RecommendationView) -> String {
+    let mut parts = Vec::new();
+    let mut preference_matches = recommendation.matched_liked_ingredients.clone();
+    preference_matches.extend(recommendation.matched_preferred_tags.clone());
+
+    if !preference_matches.is_empty() {
+        parts.push(format!(
+            "Matches {}",
+            preference_matches
+                .into_iter()
+                .take(3)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if let Some(related) = recommendation.related_selected_dishes.first() {
+        parts.push(format!("Often ordered with {related}"));
+    }
+    if recommendation.popularity_score > 0.0 && parts.is_empty() {
+        parts.push("Popular from order history".to_string());
+    }
+    if recommendation.business_rule_score > 0.0 && parts.len() < 2 {
+        parts.push("Fits the menu context".to_string());
+    }
+
+    if parts.is_empty() {
+        "Based on ingredients and order patterns".to_string()
+    } else {
+        parts.join(" · ")
+    }
 }
 
 fn menu_card(dish: &DishView) -> String {
@@ -411,6 +649,23 @@ fn admin_dashboard(admin: &AdminView) -> String {
     )
 }
 
+fn admin_insight_panel() -> String {
+    r#"
+        <section class="admin-card assistant-card">
+            <div class="section-heading">
+                <div>
+                    <h2>Smart Menu Insights</h2>
+                    <p>Rule-based summary calculated from historical order baskets.</p>
+                </div>
+                <button class="ghost-action" id="refresh-admin-insights" type="button">Refresh</button>
+            </div>
+            <p class="assistant-understood" id="admin-insight-summary">Loading insights...</p>
+            <div class="insight-grid" id="admin-insight-grid"></div>
+        </section>
+    "#
+    .to_string()
+}
+
 fn frequency_list(values: &[crate::web::state::FrequencyView]) -> String {
     if values.is_empty() {
         return r#"<p class="muted">No order data yet.</p>"#.to_string();
@@ -469,6 +724,7 @@ fn live_orders_table(live_orders: &[LiveOrder]) -> String {
         r#"
         <section class="admin-card">
             <div class="section-heading"><h2>Live Orders</h2><p>Pending, preparing, and ready checkout orders from this server session.</p></div>
+            <p class="status-message" id="admin-order-status"></p>
             <div class="table-wrap">
                 <table>
                     <thead><tr><th>Order ID</th><th>Session</th><th>Dish IDs</th><th>Dish Names</th><th>Time</th><th>Total</th><th>Status</th></tr></thead>
@@ -504,7 +760,7 @@ fn completed_orders_table(orders: &[LiveOrder]) -> String {
     format!(
         r#"
         <section class="admin-card">
-            <div class="section-heading"><h2>Completed Orders This Session</h2><p>In-memory checkout orders marked Completed. These are included in collaborative filtering until the server restarts.</p></div>
+            <div class="section-heading"><h2>Completed Orders This Session</h2><p>Checkout orders marked Completed during this server session. They are also saved into data/orders.csv for future recommendation calculations.</p></div>
             <div class="form-actions">
                 <a class="ghost-link" href="/admin/export/completed-session-orders.csv">Export Completed Session Orders</a>
             </div>
@@ -536,7 +792,7 @@ fn historical_orders_table(orders: &[Order]) -> String {
     format!(
         r#"
         <section class="admin-card">
-            <div class="section-heading"><h2>Historical Orders</h2><p>Order logs loaded from data/orders.csv plus checkout orders completed during this server session.</p></div>
+            <div class="section-heading"><h2>Historical Orders</h2><p>Order logs loaded from data/orders.csv, including completed checkout orders saved by the admin flow.</p></div>
             <div class="table-wrap">
                 <table>
                     <thead><tr><th>Order ID</th><th>Session</th><th>Dishes</th><th>Timestamp</th></tr></thead>
@@ -669,8 +925,9 @@ fn recommendation_tester(options: &PreferenceOptions, dishes: &[DishView]) -> St
             <button class="primary-action" type="button" id="run-admin-recommendations">Run Recommendation Test</button>
             <div class="reason-box">
                 <strong>Scoring formula</strong>
-                <p>Hybrid score = 0.45 content + 0.25 co-order + 0.20 popularity + 0.10 time/business. Disliked ingredients are excluded before ranking.</p>
+                <p>Hybrid score normally uses 0.45 content + 0.25 co-order + 0.20 popularity + 0.10 time/business. When liked preferences are selected, content match is weighted more strongly so matching dishes rise clearly. Disliked ingredients are excluded before ranking.</p>
             </div>
+            <div class="evaluation-strip admin-evaluation-strip" id="admin-recommendation-stats"></div>
             <div class="table-wrap recommendation-results-wrap">
                 <table>
                     <thead><tr><th>Dish</th><th>Category</th><th>Content</th><th>Co-order</th><th>Popularity</th><th>Time</th><th>Hybrid</th><th>Support</th><th>Confidence</th><th>Lift</th><th>Reason</th></tr></thead>
@@ -681,6 +938,54 @@ fn recommendation_tester(options: &PreferenceOptions, dishes: &[DishView]) -> St
         "#,
         preference_panel(options, "admin")
     )
+}
+
+fn csv_data_tools_panel() -> String {
+    r#"
+        <section class="admin-card">
+            <div class="section-heading">
+                <div>
+                    <h2>CSV Import / Reload / Export</h2>
+                    <p>Use compatible dishes.csv and orders.csv files. Preview validates required columns before import.</p>
+                </div>
+            </div>
+            <p class="status-message" id="csv-import-status"></p>
+
+            <div class="admin-two-column">
+                <div class="data-tool-card">
+                    <h3>Dishes CSV</h3>
+                    <p class="muted">Required columns: dish_id, name, ingredients, category, tags.</p>
+                    <input id="dish-csv-file" type="file" accept=".csv,text/csv">
+                    <textarea id="dish-csv-import" rows="7" placeholder="Upload a CSV file or paste dishes.csv content here"></textarea>
+                    <div class="csv-mode-row">
+                        <label><input type="radio" name="dish-import-mode" value="replace" checked> Replace current dishes</label>
+                        <label><input type="radio" name="dish-import-mode" value="merge"> Merge by dish ID</label>
+                    </div>
+                    <div class="form-actions">
+                        <button class="primary-action" id="import-dishes-button" type="button">Import Dishes</button>
+                        <button class="ghost-action" id="reload-dishes-button" type="button">Reload data/dishes.csv</button>
+                        <a class="ghost-link" href="/admin/export/dishes.csv">Export Dishes</a>
+                    </div>
+                    <div class="csv-preview" id="dish-csv-preview"></div>
+                </div>
+
+                <div class="data-tool-card">
+                    <h3>Orders CSV</h3>
+                    <p class="muted">Required columns: order_id, session_user_id, ordered_dishes, timestamp.</p>
+                    <input id="order-csv-file" type="file" accept=".csv,text/csv">
+                    <textarea id="order-csv-import" rows="7" placeholder="Upload a CSV file or paste orders.csv content here"></textarea>
+                    <div class="form-actions">
+                        <button class="primary-action" id="import-orders-button" type="button">Import Orders</button>
+                        <button class="ghost-action" id="reload-orders-button" type="button">Reload data/orders.csv</button>
+                        <a class="ghost-link" href="/admin/export/orders.csv">Export Historical Orders</a>
+                        <a class="ghost-link" href="/admin/export/completed-session-orders.csv">Export Completed Session Orders</a>
+                    </div>
+                    <div class="csv-preview" id="order-csv-preview"></div>
+                </div>
+            </div>
+        </section>
+    "#
+    .to_string()
 }
 
 fn bottom_nav(active: &str) -> String {

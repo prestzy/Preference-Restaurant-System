@@ -1,11 +1,12 @@
 use crate::models::{Dish, UserPreference};
 use std::collections::HashSet;
 
-/// Checks whether a dish contains any ingredient the user dislikes.
+/// Checks whether a dish contains any ingredient/tag/category the user avoids.
 ///
-/// In this prototype, disliked ingredients are used as a hard exclusion rule.
-/// This keeps the recommendation behaviour easy to explain during an FYP demo:
-/// if the user says "beef", beef dishes are removed before ranking.
+/// In this prototype, disliked terms are used as a hard exclusion rule. The
+/// field is still named `disliked_ingredients` for backward compatibility with
+/// the original GUI, but the Smart Menu Assistant may also place negated tags
+/// such as `spicy` here so phrases like "no spicy" can be respected.
 pub fn check_disliked_ingredients(dish: &Dish, preference: &UserPreference) -> bool {
     !matched_disliked_ingredients(dish, preference).is_empty()
 }
@@ -91,12 +92,14 @@ pub fn matched_liked_ingredients(dish: &Dish, preference: &UserPreference) -> Ve
     sorted_values(matches)
 }
 
-/// Returns the preferred tags that match a dish.
+/// Returns preferred tag/category values that match a dish.
 pub fn matched_preferred_tags(dish: &Dish, preference: &UserPreference) -> Vec<String> {
     let mut matches = HashSet::new();
 
     for preferred_tag in &preference.preferred_tags {
-        if dish.tags.iter().any(|tag| term_matches(tag, preferred_tag)) {
+        if dish.tags.iter().any(|tag| term_matches(tag, preferred_tag))
+            || term_matches(&dish.category, preferred_tag)
+        {
             matches.insert(preferred_tag.clone());
         }
     }
@@ -104,11 +107,11 @@ pub fn matched_preferred_tags(dish: &Dish, preference: &UserPreference) -> Vec<S
     sorted_values(matches)
 }
 
-/// Returns disliked ingredients that match a dish.
+/// Returns disliked ingredient/tag/category terms that match a dish.
 ///
 /// Recommended dishes should normally have an empty result here because the
 /// hybrid recommender excludes disliked dishes before ranking. Keeping this as
-/// a public helper lets the Evaluation page explain that exclusion explicitly.
+/// a public helper lets the UI explain that exclusion explicitly.
 pub fn matched_disliked_ingredients(dish: &Dish, preference: &UserPreference) -> Vec<String> {
     let mut matches = HashSet::new();
 
@@ -117,6 +120,8 @@ pub fn matched_disliked_ingredients(dish: &Dish, preference: &UserPreference) ->
             .ingredients
             .iter()
             .any(|ingredient| term_matches(ingredient, disliked))
+            || dish.tags.iter().any(|tag| term_matches(tag, disliked))
+            || term_matches(&dish.category, disliked)
         {
             matches.insert(disliked.clone());
         }

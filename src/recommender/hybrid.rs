@@ -24,6 +24,7 @@ const BUSINESS_RULE_WEIGHT: f32 = 0.10;
 #[derive(Debug, Clone, Default)]
 pub struct RecommendationStats {
     pub filtered_dishes: usize,
+    pub matched_preference_dishes: usize,
     pub excluded_due_to_disliked: usize,
     pub skipped_selected_dishes: usize,
     pub diversity_count_top_5: usize,
@@ -71,9 +72,17 @@ pub fn generate_recommendations(
             continue;
         }
 
-        stats.filtered_dishes += 1;
-
         let ingredient_score = calculate_ingredient_score(dish, preference);
+        let matched_liked_ingredients = matched_liked_ingredients(dish, preference);
+        let matched_preferred_tags = matched_preferred_tags(dish, preference);
+        let matched_disliked_ingredients = matched_disliked_ingredients(dish, preference);
+        let matches_preferences =
+            !matched_liked_ingredients.is_empty() || !matched_preferred_tags.is_empty();
+        stats.filtered_dishes += 1;
+        if matches_preferences {
+            stats.matched_preference_dishes += 1;
+        }
+
         let co_order_score = calculate_co_order_score(
             &co_order_matrix,
             &preference.selected_dish_ids,
@@ -87,6 +96,7 @@ pub fn generate_recommendations(
             popularity_score,
             business_rule_score,
             ranking_method,
+            preference.has_content_preferences(),
         );
 
         if final_score <= 0.0 {
@@ -100,9 +110,6 @@ pub fn generate_recommendations(
             }
         }
 
-        let matched_liked_ingredients = matched_liked_ingredients(dish, preference);
-        let matched_preferred_tags = matched_preferred_tags(dish, preference);
-        let matched_disliked_ingredients = matched_disliked_ingredients(dish, preference);
         let related_selected_dish_ids = related_selected_dishes(
             &co_order_matrix,
             &preference.selected_dish_ids,
@@ -191,6 +198,7 @@ pub fn combine_scores(
     popularity_score: f32,
     business_rule_score: f32,
     ranking_method: RankingMethod,
+    has_content_preferences: bool,
 ) -> f32 {
     let score = match ranking_method {
         RankingMethod::ContentBased => ingredient_score,
@@ -202,10 +210,21 @@ pub fn combine_scores(
             }
         }
         RankingMethod::Hybrid => {
-            CONTENT_WEIGHT * ingredient_score
-                + CO_ORDER_WEIGHT * co_order_score
-                + POPULARITY_WEIGHT * popularity_score
-                + BUSINESS_RULE_WEIGHT * business_rule_score
+            if has_content_preferences {
+                // When customers choose liked ingredients/tags, content match
+                // should visibly dominate the ordering. Non-matching dishes can
+                // still appear as fallback alternatives, but exact preference
+                // matches are strongly prioritised.
+                0.65 * ingredient_score
+                    + 0.15 * co_order_score
+                    + 0.15 * popularity_score
+                    + 0.05 * business_rule_score
+            } else {
+                CONTENT_WEIGHT * ingredient_score
+                    + CO_ORDER_WEIGHT * co_order_score
+                    + POPULARITY_WEIGHT * popularity_score
+                    + BUSINESS_RULE_WEIGHT * business_rule_score
+            }
         }
     };
 
@@ -301,9 +320,16 @@ mod tests {
 
     #[test]
     fn hybrid_formula_uses_all_component_scores() {
-        let score = combine_scores(1.0, 0.5, 0.25, 1.0, RankingMethod::Hybrid);
+        let score = combine_scores(1.0, 0.5, 0.25, 1.0, RankingMethod::Hybrid, false);
 
         assert!((score - 0.725).abs() < 0.0001);
+    }
+
+    #[test]
+    fn content_preferences_receive_stronger_hybrid_weight() {
+        let score = combine_scores(1.0, 0.0, 1.0, 0.0, RankingMethod::Hybrid, true);
+
+        assert!((score - 0.80).abs() < 0.0001);
     }
 
     #[test]
@@ -324,5 +350,29 @@ mod tests {
         assert!(!output.recommendations.is_empty());
         assert_eq!(output.recommendations[0].dish.dish_id, "D02");
         assert!(output.recommendations[0].popularity_score > 0.0);
+    }
+
+    #[test]
+    fn liked_preferences_are_counted_as_matches_without_hard_filtering() {
+        let dishes = vec![
+            dish(
+                "D01",
+                "Chicken Rice",
+                "main",
+                &["chicken", "rice"],
+                &["signature"],
+            ),
+            dish("D02", "Plain Rice", "main", &["rice"], &["simple"]),
+        ];
+        let preference = UserPreference {
+            liked_ingredients: vec!["chicken".to_string()],
+            ..UserPreference::default()
+        };
+
+        let output = generate_recommendations(&dishes, &[], &preference);
+
+        assert_eq!(output.stats.filtered_dishes, 2);
+        assert_eq!(output.stats.matched_preference_dishes, 1);
+        assert_eq!(output.recommendations[0].dish.dish_id, "D01");
     }
 }

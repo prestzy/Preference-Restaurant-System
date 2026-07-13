@@ -1,7 +1,7 @@
 use crate::models::{Dish, DishRow, Order, OrderRow};
 use anyhow::{Result, bail};
 use std::fs::{self, OpenOptions};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::Path;
 
 /// Default CSV location for the menu data used by the prototype.
@@ -296,10 +296,115 @@ pub fn append_order_to_csv(order: &Order, path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Appends a completed web checkout basket to the historical `orders.csv` log.
+///
+/// Live checkout orders use IDs such as `WEB001` while they are active. The
+/// historical CSV keeps the original dataset style, so this function generates
+/// the next `Oxxx` order ID and `Uxx` session ID by scanning the existing CSV
+/// before writing. The returned `Order` is the exact row appended to disk.
+pub fn append_completed_order_to_csv(
+    ordered_dishes: &[String],
+    timestamp: &str,
+    path: &str,
+) -> Result<Order> {
+    let path = Path::new(path);
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
+    }
+
+    let file_exists = path.exists();
+    let file_has_content = file_exists && fs::metadata(path)?.len() > 0;
+    let existing_orders = if file_has_content {
+        load_orders(&path.to_string_lossy())?
+    } else {
+        Vec::new()
+    };
+
+    if file_has_content {
+        ensure_trailing_newline(path)?;
+    }
+
+    let order = Order {
+        order_id: format!(
+            "O{:03}",
+            next_numeric_id(&existing_orders, |order| &order.order_id)
+        ),
+        session_user_id: format!(
+            "U{}",
+            next_numeric_id(&existing_orders, |order| &order.session_user_id)
+        ),
+        ordered_dishes: ordered_dishes
+            .iter()
+            .map(|dish_id| dish_id.trim().to_uppercase())
+            .filter(|dish_id| !dish_id.is_empty())
+            .collect(),
+        timestamp: timestamp.trim().to_string(),
+    };
+
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+
+    if !file_has_content {
+        file.write_all(b"order_id,session_user_id,ordered_dishes,timestamp\n")?;
+    }
+
+    writeln!(
+        file,
+        "{},{},\"{}\",\"{}\"",
+        csv_plain_field(&order.order_id),
+        csv_plain_field(&order.session_user_id),
+        csv_quoted_field(&order.ordered_dishes.join(",")),
+        csv_quoted_field(&order.timestamp)
+    )?;
+
+    Ok(order)
+}
+
+fn csv_plain_field(value: &str) -> String {
+    value.replace(['\r', '\n', ','], "")
+}
+
+fn csv_quoted_field(value: &str) -> String {
+    value.replace('"', "\"\"")
+}
+
+fn next_numeric_id<'a>(orders: &'a [Order], field: impl Fn(&'a Order) -> &'a str) -> u32 {
+    orders
+        .iter()
+        .filter_map(|order| numeric_suffix(field(order)))
+        .max()
+        .unwrap_or(0)
+        + 1
+}
+
+fn numeric_suffix(value: &str) -> Option<u32> {
+    let digits = value
+        .trim()
+        .chars()
+        .skip_while(|character| !character.is_ascii_digit())
+        .collect::<String>();
+    digits.parse::<u32>().ok()
+}
+
+fn ensure_trailing_newline(path: &Path) -> Result<()> {
+    let bytes = fs::read(path)?;
+    if matches!(bytes.last(), Some(b'\n' | b'\r')) {
+        return Ok(());
+    }
+
+    let mut file = OpenOptions::new().append(true).open(path)?;
+    file.write_all(b"\n")?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Cursor;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn parses_older_five_column_dishes_csv() {
@@ -385,5 +490,44 @@ O001,U01,2026-01-01 12:30
             .expect_err("missing ordered_dishes should be reported");
 
         assert!(error.to_string().contains("ordered_dishes"));
+    }
+
+    #[test]
+    fn append_completed_order_to_csv_generates_historical_format() {
+        let path = temp_csv_path("append_completed_order");
+        fs::write(
+            &path,
+            "order_id,session_user_id,ordered_dishes,timestamp\nO060,U20,\"D20,D05\",\"2025-12-15 14:40\"",
+        )
+        .expect("seed CSV should write");
+        let ordered_dishes = vec!["D01".to_string(), "D09".to_string()];
+
+        let appended = append_completed_order_to_csv(
+            &ordered_dishes,
+            "2026-07-13 15:30",
+            path.to_str().unwrap(),
+        )
+        .expect("append works");
+        let loaded = load_orders(path.to_str().unwrap()).expect("appended CSV reloads");
+        let raw = fs::read_to_string(&path).expect("CSV is readable");
+        let _ = fs::remove_file(&path);
+
+        assert_eq!(appended.order_id, "O061");
+        assert_eq!(appended.session_user_id, "U21");
+        assert_eq!(appended.timestamp, "2026-07-13 15:30");
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[1].ordered_dishes, vec!["D01", "D09"]);
+        assert_eq!(raw.matches("order_id,session_user_id").count(), 1);
+        assert!(raw.contains("O061,U21,\"D01,D09\",\"2026-07-13 15:30\""));
+        assert!(!raw.contains("WEB001"));
+        assert!(!raw.contains("unix:"));
+    }
+
+    fn temp_csv_path(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be valid")
+            .as_nanos();
+        std::env::temp_dir().join(format!("fyp_{label}_{unique}.csv"))
     }
 }
