@@ -2,87 +2,99 @@
 
 ## What the System Does
 
-The Preference-Driven Restaurant Ordering System is a desktop prototype for helping customers discover suitable dishes from one restaurant menu.
+The Preference-Driven Restaurant Ordering System is a web-based QR ordering prototype for a single restaurant.
 
-The system considers:
+Customers use their own phone to:
 
-- What ingredients the customer likes.
-- What ingredients the customer dislikes.
-- What tags or food styles the customer prefers.
-- What dishes are often ordered together historically.
+- browse the menu
+- search dishes
+- choose preferences
+- receive dish recommendations
+- add dishes to cart
+- place a prototype order
 
-The output is a ranked list of recommended dishes with explanations.
+Restaurant staff use the Admin page to:
 
-Local dish thumbnails help customers and evaluators recognize menu items visually. Images are used only on menu cards and recommendation cards; they are not part of the scoring algorithm.
+- view dashboard metrics
+- monitor live orders
+- update order status
+- manage dishes in memory
+- import/export CSV data
+- test recommendation scenarios
 
-## Why It Is Explainable
+## Why QR-Based Web Ordering
 
-The recommendation result is not a black box. Each recommended dish shows:
+The original standalone application direction required a dedicated device. The new web direction is more realistic for small restaurants because customers can scan a QR code and use their own phone.
 
-- Ingredient score.
-- Co-order score.
-- Final hybrid score.
-- A short explanation in plain language.
-
-This makes it suitable for an FYP presentation because evaluators can see how input preferences influence output recommendations.
-
-## Main User Experience
-
-The main page is **Explore & Recommend**.
-
-Stakeholders can:
-
-1. Browse the menu.
-2. Search by dish, ingredient, tag, category, or ID.
-3. Select dishes from menu cards.
-4. Enter preferences.
-5. Open Evaluation to view updated recommendations and score explanations.
-
-The previous separated flow has been merged into one practical workflow so users do not need to jump between menu, preferences, and recommendation pages.
+This lowers hardware cost while still allowing the FYP to demonstrate recommendation logic and ordering workflow.
 
 ## Recommendation Approach
 
-### Ingredient-Based Filtering
+The system is designed to be explainable, not a black box.
 
-The system compares each dish against explicit user preferences.
+Signals:
 
-- Liked ingredients increase the ingredient score.
-- Preferred tags add a small score bonus.
-- Disliked ingredients exclude the dish from recommendation ranking.
+- liked ingredients
+- disliked ingredients
+- preferred tags
+- selected/current dishes
+- historical co-order patterns
 
-### Collaborative Filtering
+Algorithms:
 
-The system reads historical orders and counts dish pairs that were ordered together.
+- content/ingredient-based filtering
+- co-order collaborative filtering
+- hybrid scoring
 
-If a user selects `D01`, the system looks for dishes frequently ordered with `D01`.
+Recommendation cards and the admin tester show the reason and score breakdown so a lecturer or stakeholder can understand why a dish was suggested.
 
-### Hybrid Scoring
+## Customer Experience
 
-When both preference and selected dish information are available:
+The customer-facing layout keeps the orange/white mobile-first design:
 
-```text
-final_score = 0.4 * ingredient_score + 0.6 * co_order_score
-```
+1. Search bar.
+2. Category chips.
+3. Preference panel.
+4. Recommended for You horizontal cards.
+5. Menu grid/list.
+6. Dish detail modal.
+7. Cart and checkout.
+8. Bottom navigation.
 
-If selected dishes are missing, the system relies more on ingredient preferences. If preferences are missing, it relies more on co-order history.
+Dish images are local and optional. If an image is missing, the UI shows a clean placeholder instead of failing.
 
-## Order Simulation
+## Staff/Admin Experience
 
-Order simulation is an admin/demo tool.
+The Admin page supports prototype operations:
 
-It exists so presenters can demonstrate how collaborative filtering changes when new ordering behaviour is introduced.
+- live order table
+- order status workflow
+- dish management
+- CSV import/export
+- recommendation testing/evaluation
+- historical order table
 
-It is not shown as a normal customer step because real customers would place orders through a checkout flow, while this prototype focuses on recommendation behaviour.
+Admin changes are in memory for the running server session. CSV export provides a simple way to save the current demo state.
 
-## What Can Be Extended
+## Prototype Scope
 
-Future improvements can add:
+This is not a production commercial ordering system. It intentionally avoids heavy infrastructure so the FYP can focus on:
 
-- More restaurant dishes.
-- More historical order records.
-- More locally stored dish images with recorded source licenses.
-- More precise dietary tags.
-- A checkout workflow.
-- More evaluation metrics.
+- recommendation explainability
+- practical QR ordering flow
+- CSV-based dataset management
+- simple Rust architecture
+- low coupling and high cohesion
 
-The current system is intentionally lightweight so the core recommendation logic remains easy to inspect and explain.
+## Future Improvements
+
+Suggested future work:
+
+- real price column
+- persistent database
+- QR table/session IDs
+- admin authentication
+- kitchen display page
+- payment integration
+- stronger evaluation metrics
+- automatic CSV persistence after admin edits

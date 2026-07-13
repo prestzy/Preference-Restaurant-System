@@ -1,106 +1,109 @@
 # Preference-Driven Restaurant Ordering System
 
-Rust desktop GUI prototype for a Final Year Project restaurant ordering and recommendation system.
+Rust web prototype for a Final Year Project restaurant ordering and recommendation system.
 
-The application helps a single restaurant demonstrate explainable dish recommendations using:
+The project direction is now QR-based ordering: customers scan a QR code with their own phone, open a responsive restaurant menu, choose preferences, receive explainable dish recommendations, add items to cart, and place a prototype order. This avoids the cost of placing one tablet at every table.
 
-- Ingredient-based filtering from liked ingredients, disliked ingredients, and preferred tags.
-- Co-ordering-based collaborative filtering from historical order logs.
-- Hybrid scoring that combines both signals when both are available.
+## Current Features
 
-The app is intentionally lightweight. It uses CSV files, standard Rust collections, and `eframe/egui` for the desktop GUI. It does not use heavy machine learning libraries.
+- Mobile-first orange/white customer menu.
+- Search by dish name, dish ID, ingredient, category, or tag.
+- Category chips for All, Main, Side, Appetizer, and Dessert.
+- Local dish image support with a graceful placeholder.
+- “Recommended for You” cards powered by Rust recommendation logic.
+- Preference chips generated from the CSV dataset:
+  - liked ingredients
+  - disliked ingredients
+  - preferred tags
+- Cart with quantities, total price placeholder, and prototype checkout.
+- Live in-memory orders created from checkout.
+- Staff/admin page for dashboard metrics, live order status, dish management, CSV tools, and recommendation testing.
+- CSV-based data loading, import, and export.
 
-## Run
+## Run Locally
 
 ```powershell
 cargo run
 ```
 
-On startup the app:
-
-1. Creates `data/dishes.csv` and `data/orders.csv` if they are missing.
-2. Creates `assets/dishes/` if it is missing.
-3. Loads dishes and orders from CSV.
-4. Starts the Rust desktop GUI.
-
-## Main Workflow
-
-Open **Explore & Recommend**.
-
-There you can:
-
-- Browse the menu.
-- Search by multiple terms.
-- Select dishes directly from the menu cards.
-- Select liked ingredients, disliked ingredients, and preferred tags from generated options.
-- Open Evaluation to see updated recommendations and reasoning.
-
-On wider windows the menu and preference/selected-dish panels appear side by side. On narrower windows the same sections stack vertically.
-
-## Dish Images
-
-Dish images are optional local assets stored in:
+Open:
 
 ```text
-assets/dishes/
+http://127.0.0.1:3000/
 ```
 
-The app never hotlinks online images at runtime. For each dish it first uses an optional `image_path` column from `data/dishes.csv`. If that is missing or points to a missing file, it tries these fallback names:
+Useful routes:
 
 ```text
-assets/dishes/{dish_id}.jpg
-assets/dishes/{dish_id}.png
-assets/dishes/{dish_id}.jpeg
+http://127.0.0.1:3000/        Customer menu
+http://127.0.0.1:3000/cart    Cart and checkout
+http://127.0.0.1:3000/orders  Customer order placeholder
+http://127.0.0.1:3000/admin   Staff/admin tools
 ```
 
-For example, `D01` can use `assets/dishes/D01.jpg`. If no file exists, the GUI shows a clean `No image` placeholder.
+On startup the app creates `data/dishes.csv` and `data/orders.csv` if they are missing.
 
-Images are shown only in:
+## Data and Images
 
-- **Explore & Recommend** menu dish cards.
-- **Evaluation** recommendation result cards.
-
-They are not shown in Dashboard, Preference Panel, Admin / Demo Tools, or page headers because images are only meant to help customers recognize menu and recommended dishes.
-
-Clicking an available dish thumbnail opens a larger in-app preview with the dish name and ID. Missing images keep the `No image` placeholder and do not affect recommendation behavior.
-
-Image source records are stored in:
-
-```text
-assets/dish_image_sources.csv
-```
-
-To replace or add an image, place a JPG or PNG file in `assets/dishes/` using the dish ID filename, then update `assets/dish_image_sources.csv` with the source URL, license, source page, and local path.
-
-## Data Files
-
-CSV files are stored in:
+CSV files:
 
 ```text
 data/dishes.csv
 data/orders.csv
 ```
 
-See [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) for exact CSV columns, optional image fields, and examples.
+Dish images:
 
-## Documentation
+```text
+assets/dishes/
+```
 
-- [Architecture](docs/ARCHITECTURE.md)
-- [User Guide](docs/USER_GUIDE.md)
-- [Stakeholder Overview](docs/STAKEHOLDER_OVERVIEW.md)
-- [Data Format](docs/DATA_FORMAT.md)
+Image lookup order:
+
+1. `image_path` column in `data/dishes.csv`, if present and the file exists.
+2. `assets/dishes/{dish_id}.jpg`
+3. `assets/dishes/{dish_id}.png`
+4. `assets/dishes/{dish_id}.jpeg`
+5. Orange/white placeholder if no local image exists.
+
+Image sources can be documented in:
+
+```text
+assets/dish_image_sources.csv
+```
+
+See [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) for exact columns and examples.
+
+## Recommendation Approach
+
+The recommender stays lightweight and explainable:
+
+- Ingredient/content filtering uses liked ingredients, disliked ingredients, and preferred tags.
+- Collaborative filtering builds an item-item co-order matrix from `orders.csv`.
+- Hybrid scoring combines content and co-order scores.
+- Result cards and the admin recommendation tester show score breakdowns and plain-language explanations.
+
+No heavy machine learning libraries are used.
+
+## Project Structure
+
+- `src/models.rs`: data structures only.
+- `src/data_loader.rs`: CSV loading/import/export helpers.
+- `src/recommender/`: content, collaborative, and hybrid recommendation logic.
+- `src/web/state.rs`: shared web state and view-model preparation.
+- `src/web/routes.rs`: Axum route declarations.
+- `src/web/handlers/`: focused HTTP handlers for menu, cart, orders, admin, and recommendations.
+- `src/web/templates.rs`: server-rendered HTML templates.
+- `static/app.css`: orange/white responsive UI styling.
+- `static/app.js`: lightweight browser behavior for search, preferences, cart, checkout, admin tools, and recommendation refresh.
+
+Legacy desktop GUI files remain in `src/gui/` for reference, but `cargo run` now starts the web server.
 
 ## Validation
 
-Run:
-
 ```powershell
-cargo test
 cargo check
+cargo test
 ```
 
-Tests cover multi-term filtering, match-any/match-all search logic, recommendation refresh behaviour, dish selection input, and order simulation updates.
-
-## Dependency Note
-
-The project keeps dependencies minimal. Recommendation logic remains custom Rust code and does not use heavy machine learning libraries. The `image` crate is used only to decode local JPG/PNG dish thumbnails for egui.
+Tests cover CSV parsing, search/filter logic, preference option extraction, recommendation behavior, checkout/live orders, admin availability, and dish management state.

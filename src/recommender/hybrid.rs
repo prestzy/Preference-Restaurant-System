@@ -31,6 +31,7 @@ pub struct RecommendationStats {
 #[derive(Debug, Clone, Default)]
 pub struct RecommendationOutput {
     pub recommendations: Vec<RecommendationResult>,
+    #[allow(dead_code)]
     pub stats: RecommendationStats,
 }
 

@@ -5,10 +5,11 @@
 //! keeping the extraction logic separate from rendering code.
 
 use crate::models::Dish;
+use serde::Serialize;
 use std::collections::BTreeSet;
 
 /// Selectable preference options generated from the menu dataset.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct PreferenceOptions {
     pub ingredients: Vec<String>,
     pub tags: Vec<String>,

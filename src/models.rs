@@ -40,6 +40,7 @@ pub struct Dish {
     ///
     /// When this is missing or the file does not exist, the image loader tries
     /// the fallback dish-ID filenames under `assets/dishes/`.
+    #[allow(dead_code)]
     pub image_path: Option<String>,
     /// Optional source URL retained for traceability.
     ///
@@ -112,6 +113,7 @@ impl UserPreference {
 /// the prototype suitable for an FYP presentation because every recommendation
 /// can be explained in plain language.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct RecommendationResult {
     pub dish: Dish,
     pub ingredient_score: f32,

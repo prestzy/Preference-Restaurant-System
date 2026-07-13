@@ -1,6 +1,7 @@
 use crate::models::{Dish, DishRow, Order, OrderRow};
 use anyhow::Result;
 use std::fs::{self, OpenOptions};
+use std::io::Read;
 use std::path::Path;
 
 /// Default CSV location for the menu data used by the prototype.
@@ -76,10 +77,21 @@ pub fn generate_sample_data_if_missing() -> Result<()> {
 /// `DishRow` represents the raw CSV shape, while `Dish` is the cleaned model
 /// used by the recommender. Dish IDs are uppercased so comparisons are stable.
 pub fn load_dishes(path: &str) -> Result<Vec<Dish>> {
+    let file = fs::File::open(path)?;
+    parse_dishes_from_reader(file)
+}
+
+/// Parses dish records from any reader using the same rules as startup loading.
+///
+/// The web admin CSV import uses this function so imported data is cleaned in
+/// exactly the same way as `data/dishes.csv`: IDs are uppercased, ingredients
+/// and tags are split/lowercased, and optional image columns stay backward
+/// compatible.
+pub fn parse_dishes_from_reader<R: Read>(reader: R) -> Result<Vec<Dish>> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
         .trim(csv::Trim::All)
-        .from_path(path)?;
+        .from_reader(reader);
     let headers = reader.headers()?.clone();
     let mut dishes = Vec::new();
 
@@ -91,23 +103,62 @@ pub fn load_dishes(path: &str) -> Result<Vec<Dish>> {
 
         let row: DishRow = record.deserialize(Some(&headers))?;
 
-        let dish = Dish {
-            dish_id: row.dish_id.trim().to_uppercase(),
-            name: row.name.trim().to_string(),
-            ingredients: split_csv_field(&row.ingredients),
-            category: row.category.trim().to_lowercase(),
-            tags: split_csv_field(&row.tags),
-            // Optional image columns are intentionally not required in the CSV.
-            // Empty strings are normalized to None so the image loader can fall
-            // back to assets/dishes/{dish_id}.jpg, .png, or .jpeg.
-            image_path: clean_optional_field(row.image_path),
-            image_source_url: clean_optional_field(row.image_source_url),
-        };
-
-        dishes.push(dish);
+        dishes.push(clean_dish_row(row));
     }
 
     Ok(dishes)
+}
+
+/// Serializes cleaned dish models back into a CSV string.
+///
+/// This supports lightweight admin export without coupling the web handler to
+/// CSV column details. Optional image fields are included so future datasets can
+/// keep local image paths while older five-column CSV files still import fine.
+pub fn dishes_to_csv(dishes: &[Dish]) -> Result<String> {
+    let mut writer = csv::Writer::from_writer(Vec::new());
+    writer.write_record([
+        "dish_id",
+        "name",
+        "ingredients",
+        "category",
+        "tags",
+        "image_path",
+        "image_source_url",
+    ])?;
+
+    for dish in dishes {
+        let ingredients = dish.ingredients.join(",");
+        let tags = dish.tags.join(",");
+        let image_path = dish.image_path.clone().unwrap_or_default();
+        let image_source_url = dish.image_source_url.clone().unwrap_or_default();
+        writer.write_record([
+            dish.dish_id.as_str(),
+            dish.name.as_str(),
+            ingredients.as_str(),
+            dish.category.as_str(),
+            tags.as_str(),
+            image_path.as_str(),
+            image_source_url.as_str(),
+        ])?;
+    }
+
+    let bytes = writer.into_inner()?;
+    Ok(String::from_utf8(bytes)?)
+}
+
+fn clean_dish_row(row: DishRow) -> Dish {
+    Dish {
+        dish_id: row.dish_id.trim().to_uppercase(),
+        name: row.name.trim().to_string(),
+        ingredients: split_csv_field(&row.ingredients),
+        category: row.category.trim().to_lowercase(),
+        tags: split_csv_field(&row.tags),
+        // Optional image columns are intentionally not required in the CSV.
+        // Empty strings are normalized to None so the image lookup can fall
+        // back to assets/dishes/{dish_id}.jpg, .png, or .jpeg.
+        image_path: clean_optional_field(row.image_path),
+        image_source_url: clean_optional_field(row.image_source_url),
+    }
 }
 
 /// Converts an optional CSV field into a clean optional string.
@@ -125,10 +176,19 @@ fn clean_optional_field(value: Option<String>) -> Option<String> {
 /// Ordered dish IDs are split by comma and uppercased. The collaborative
 /// filtering algorithm later uses these vectors to count item-item co-orders.
 pub fn load_orders(path: &str) -> Result<Vec<Order>> {
+    let file = fs::File::open(path)?;
+    parse_orders_from_reader(file)
+}
+
+/// Parses order records from any reader using the same rules as startup loading.
+///
+/// Admin CSV import for historical order logs can use this without duplicating
+/// co-ordering preparation logic in the web layer.
+pub fn parse_orders_from_reader<R: Read>(reader: R) -> Result<Vec<Order>> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
         .trim(csv::Trim::All)
-        .from_path(path)?;
+        .from_reader(reader);
     let headers = reader.headers()?.clone();
     let mut orders = Vec::new();
 
@@ -140,24 +200,45 @@ pub fn load_orders(path: &str) -> Result<Vec<Order>> {
 
         let row: OrderRow = record.deserialize(Some(&headers))?;
 
-        let ordered_dishes = row
-            .ordered_dishes
-            .split(',')
-            .map(|dish_id| dish_id.trim().to_uppercase())
-            .filter(|dish_id| !dish_id.is_empty())
-            .collect();
-
-        let order = Order {
-            order_id: row.order_id.trim().to_string(),
-            session_user_id: row.session_user_id.trim().to_string(),
-            ordered_dishes,
-            timestamp: row.timestamp.trim().to_string(),
-        };
-
-        orders.push(order);
+        orders.push(clean_order_row(row));
     }
 
     Ok(orders)
+}
+
+/// Serializes order models into the CSV format used by the recommender.
+pub fn orders_to_csv(orders: &[Order]) -> Result<String> {
+    let mut writer = csv::Writer::from_writer(Vec::new());
+    writer.write_record(["order_id", "session_user_id", "ordered_dishes", "timestamp"])?;
+
+    for order in orders {
+        let ordered_dishes = order.ordered_dishes.join(",");
+        writer.write_record([
+            order.order_id.as_str(),
+            order.session_user_id.as_str(),
+            ordered_dishes.as_str(),
+            order.timestamp.as_str(),
+        ])?;
+    }
+
+    let bytes = writer.into_inner()?;
+    Ok(String::from_utf8(bytes)?)
+}
+
+fn clean_order_row(row: OrderRow) -> Order {
+    let ordered_dishes = row
+        .ordered_dishes
+        .split(',')
+        .map(|dish_id| dish_id.trim().to_uppercase())
+        .filter(|dish_id| !dish_id.is_empty())
+        .collect();
+
+    Order {
+        order_id: row.order_id.trim().to_string(),
+        session_user_id: row.session_user_id.trim().to_string(),
+        ordered_dishes,
+        timestamp: row.timestamp.trim().to_string(),
+    }
 }
 
 /// Appends a simulated order to `data/orders.csv`.
@@ -165,6 +246,7 @@ pub fn load_orders(path: &str) -> Result<Vec<Order>> {
 /// This is optional in the GUI. Keeping it separate from the in-memory update
 /// makes the demo clear: one path changes behaviour only for the current app
 /// session, while this path persists the new behavioural data.
+#[allow(dead_code)]
 pub fn append_order_to_csv(order: &Order, path: &str) -> Result<()> {
     let file = OpenOptions::new().create(true).append(true).open(path)?;
     let mut writer = csv::WriterBuilder::new()
@@ -180,4 +262,71 @@ pub fn append_order_to_csv(order: &Order, path: &str) -> Result<()> {
     writer.flush()?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn parses_older_five_column_dishes_csv() {
+        let csv = r#"dish_id,name,ingredients,category,tags
+D01,Nasi Lemak,"rice,coconut milk",main,"spicy,signature"
+"#;
+
+        let dishes = parse_dishes_from_reader(Cursor::new(csv)).expect("CSV should parse");
+
+        assert_eq!(dishes.len(), 1);
+        assert_eq!(dishes[0].dish_id, "D01");
+        assert_eq!(dishes[0].ingredients, vec!["rice", "coconut milk"]);
+        assert_eq!(dishes[0].image_path, None);
+    }
+
+    #[test]
+    fn parses_image_aware_dishes_csv() {
+        let csv = r#"dish_id,name,ingredients,category,tags,image_path,image_source_url
+D09,Chicken Satay,"chicken,peanut sauce",main,"grilled,signature",assets/dishes/D09.jpg,https://example.test/satay
+"#;
+
+        let dishes = parse_dishes_from_reader(Cursor::new(csv)).expect("CSV should parse");
+
+        assert_eq!(
+            dishes[0].image_path.as_deref(),
+            Some("assets/dishes/D09.jpg")
+        );
+        assert_eq!(
+            dishes[0].image_source_url.as_deref(),
+            Some("https://example.test/satay")
+        );
+    }
+
+    #[test]
+    fn exports_dishes_with_image_columns() {
+        let dishes = vec![Dish {
+            dish_id: "D01".to_string(),
+            name: "Nasi Lemak".to_string(),
+            ingredients: vec!["rice".to_string(), "egg".to_string()],
+            category: "main".to_string(),
+            tags: vec!["spicy".to_string()],
+            image_path: Some("assets/dishes/D01.jpg".to_string()),
+            image_source_url: None,
+        }];
+
+        let csv = dishes_to_csv(&dishes).expect("export should work");
+
+        assert!(csv.contains("image_path"));
+        assert!(csv.contains("assets/dishes/D01.jpg"));
+    }
+
+    #[test]
+    fn parses_orders_for_collaborative_filtering() {
+        let csv = r#"order_id,session_user_id,ordered_dishes,timestamp
+O001,U01,"d01, D02",2026-01-01 12:30
+"#;
+
+        let orders = parse_orders_from_reader(Cursor::new(csv)).expect("CSV should parse");
+
+        assert_eq!(orders[0].ordered_dishes, vec!["D01", "D02"]);
+    }
 }

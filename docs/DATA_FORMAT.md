@@ -1,6 +1,6 @@
 # Data Format
 
-The app uses CSV files so the dataset is easy to edit for FYP demonstrations.
+The prototype uses CSV so the FYP dataset is easy to inspect, edit, import, and export.
 
 ## Folder Structure
 
@@ -13,7 +13,7 @@ assets/
   dishes/
 ```
 
-If the CSV files are missing, the app creates sample data automatically.
+If `data/dishes.csv` or `data/orders.csv` is missing, the app creates sample files on startup.
 
 ## `data/dishes.csv`
 
@@ -29,39 +29,42 @@ Optional image columns:
 image_path,image_source_url
 ```
 
-Older CSV files with only the five required columns still work. Missing optional
-image fields are treated as blank.
+Older five-column CSV files still work.
 
 Example:
 
 ```csv
-D01,Nasi Lemak,"rice,coconut milk,pandan,sambal,egg,anchovies,peanuts,cucumber",main,"spicy,malay,signature"
+dish_id,name,ingredients,category,tags,image_path,image_source_url
+D01,Nasi Lemak,"rice,coconut milk,pandan,sambal,egg,anchovies,peanuts,cucumber",main,"spicy,malay,signature",assets/dishes/D01.jpg,https://example.test/source
 ```
 
-### Cleaning Rules
+### Dish Cleaning Rules
 
-When dishes are loaded:
+When dishes load:
 
-- `dish_id` is trimmed and converted to uppercase.
+- `dish_id` is trimmed and uppercased.
 - `name` is trimmed.
 - `ingredients` are split by comma, trimmed, lowercased, and empty values are removed.
 - `category` is trimmed and lowercased.
 - `tags` are split by comma, trimmed, lowercased, and empty values are removed.
-- `image_path` is trimmed when present; blank or missing values become empty optional values.
-- `image_source_url` is trimmed when present and kept only for source traceability.
+- blank `image_path` becomes empty optional data.
+- blank `image_source_url` becomes empty optional data.
 
-### Dish Image Lookup
+### Price
 
-Runtime image loading is local only. The app does not download or hotlink images
-while the GUI is running.
+The current prototype uses a generated placeholder price based on dish ID. A real `price` column can be added later.
 
-For each dish, image lookup uses this order:
+## Dish Images
 
-1. Use `image_path` from `data/dishes.csv` if the optional column exists and the file exists.
-2. Try `assets/dishes/{dish_id}.jpg`.
-3. Try `assets/dishes/{dish_id}.png`.
-4. Try `assets/dishes/{dish_id}.jpeg`.
-5. Show a `No image` placeholder if no local image exists.
+Runtime image loading is local only. The app does not hotlink online images.
+
+Lookup order:
+
+1. `image_path` from `data/dishes.csv`, if present and file exists.
+2. `assets/dishes/{dish_id}.jpg`
+3. `assets/dishes/{dish_id}.png`
+4. `assets/dishes/{dish_id}.jpeg`
+5. Orange/white placeholder if no image exists.
 
 Examples:
 
@@ -71,12 +74,16 @@ assets/dishes/D02.png
 assets/dishes/D03.jpeg
 ```
 
-Images are displayed only in the customer-facing menu cards on **Explore &
-Recommend** and in recommendation cards on **Evaluation**.
+Images are shown in:
+
+- Recommended for You cards
+- Menu cards
+- Dish detail modal
+- Admin dish management preview
 
 ## `assets/dish_image_sources.csv`
 
-This file records where local images came from.
+Use this file to record where local images came from.
 
 Required columns:
 
@@ -87,11 +94,8 @@ dish_id,dish_name,image_url,license,source_page,local_path
 Example:
 
 ```csv
-D01,Nasi Lemak,https://upload.wikimedia.org/example.jpg,CC BY 4.0,https://commons.wikimedia.org/wiki/File:Example.jpg,assets/dishes/D01.jpg
+D01,Nasi Lemak,https://example.test/nasi-lemak.jpg,Creative Commons,https://example.test/page,assets/dishes/D01.jpg
 ```
-
-If a dish has no image yet, leave `local_path` blank or mark the source fields as
-`not downloaded`.
 
 ## `data/orders.csv`
 
@@ -108,32 +112,44 @@ O001,U01,"D01,D03",2026-01-01 12:30
 O002,U02,"D02,D04",2026-01-01 13:00
 ```
 
-### Cleaning Rules
+### Order Cleaning Rules
 
-When orders are loaded:
+When orders load:
 
 - `order_id` is trimmed.
 - `session_user_id` is trimmed.
 - `ordered_dishes` is split by comma, trimmed, uppercased, and empty values are removed.
 - `timestamp` is trimmed.
+- blank rows are skipped.
 
-Blank rows are skipped.
+Historical order logs power the co-order collaborative filtering matrix.
+
+## Admin Import and Export
+
+The Admin page can:
+
+- import dish CSV text
+- export current in-memory dishes
+- import historical order CSV text
+- export current historical orders
+
+Imports affect the running server session. Use export to download the current in-memory dataset.
 
 ## Extending the Dataset
 
-To add a dish:
+To add a dish manually:
 
 1. Add a row to `data/dishes.csv`.
-2. Give the dish a unique uppercase-style ID such as `D31`.
+2. Use a unique dish ID such as `D31`.
 3. Add ingredients and tags as comma-separated values.
-4. Optionally place an image at `assets/dishes/D31.jpg`, `assets/dishes/D31.png`, or `assets/dishes/D31.jpeg`.
+4. Optionally add `image_path`.
 5. Optionally add image source details to `assets/dish_image_sources.csv`.
-6. Save the CSV and restart the application.
+6. Restart the app or import the CSV through Admin.
 
 To improve collaborative filtering:
 
 1. Add more rows to `data/orders.csv`.
-2. Include two or more dish IDs in `ordered_dishes`.
-3. Re-run the application.
+2. Include at least two dish IDs in `ordered_dishes`.
+3. Restart the app or import the order CSV through Admin.
 
-More co-order examples give the collaborative filtering matrix stronger signals.
+More co-order examples produce stronger collaborative recommendation evidence.

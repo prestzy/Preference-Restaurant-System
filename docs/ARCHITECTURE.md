@@ -1,16 +1,17 @@
 # Architecture
 
-This repository is a Rust desktop GUI prototype, not a web app. The design goal is high cohesion and low coupling: each module owns one clear responsibility.
+This repository is a lightweight Rust web prototype for QR-based restaurant ordering. The design goal is high cohesion and low coupling: each module owns one clear responsibility.
 
-## Application Flow
+## Runtime Flow
 
-1. `main.rs` creates missing sample data.
-2. `data_loader.rs` reads CSV files into raw row models, then cleans them into system models.
-3. `image_loader.rs` ensures the local dish image folder exists and later caches local thumbnails.
-4. `gui::RestaurantOrderingApp` starts the egui desktop application.
-5. `gui::state::AppState` owns mutable UI state and triggers recommendation refreshes.
-6. `recommender::hybrid` generates ranked recommendation results using ingredient and collaborative scores.
-7. `gui::pages` renders Dashboard, Explore & Recommend, Evaluation, and Admin / Demo Tools pages.
+1. `main.rs` creates sample CSV files if needed.
+2. `data_loader.rs` loads and cleans dishes and historical orders.
+3. `WebState` stores dishes, historical orders, live checkout orders, and in-memory dish availability.
+4. `web::routes` maps URLs to focused handlers.
+5. `web::handlers::*` process HTTP requests.
+6. `web::templates` renders server-side HTML.
+7. `static/app.js` handles browser-only interaction: search, chips, cart quantities, modal details, checkout, admin actions, and recommendation refresh.
+8. `recommender::*` remains the only place where recommendation scoring is calculated.
 
 ## Module Responsibilities
 
@@ -18,143 +19,102 @@ This repository is a Rust desktop GUI prototype, not a web app. The design goal 
 
 Data structures only:
 
-- `DishRow`
-- `Dish`
-- `OrderRow`
-- `Order`
-- `UserPreference`
-- `RecommendationResult`
-
-`DishRow` and `OrderRow` represent raw CSV rows. `Dish` and `Order` are cleaned models used by the app.
-
-`Dish` also stores optional `image_path` and `image_source_url` values. These are data fields only; image loading is handled by `image_loader.rs`.
+- `DishRow` and `OrderRow` for raw CSV rows.
+- `Dish` and `Order` for cleaned app models.
+- `UserPreference` for recommendation input.
+- `RecommendationResult` for explainable ranking output.
 
 ### `data_loader.rs`
 
-CSV and file persistence only:
+CSV and file handling only:
 
-- Generate sample CSV files if missing.
-- Load dishes and orders.
-- Clean comma-separated ingredients, tags, and dish IDs.
-- Append simulated orders to `orders.csv` when enabled.
+- Generates sample data if files are missing.
+- Loads dishes and orders from CSV.
+- Reuses the same parsers for admin CSV import.
+- Exports current in-memory dishes and historical orders as CSV.
 
-### `recommender/ingredient_filter.rs`
+### `recommender/`
 
-Content-based recommendation logic:
+Recommendation logic only:
 
-- Detect disliked ingredients.
-- Score liked ingredient matches.
-- Add preferred tag bonus.
-- Build plain-language ingredient explanations.
+- `ingredient_filter.rs`: liked ingredient, disliked ingredient, and tag scoring.
+- `collaborative_filter.rs`: item-item co-order frequency matrix.
+- `hybrid.rs`: adaptive hybrid scoring and recommendation ranking.
 
-### `recommender/collaborative_filter.rs`
+The web layer passes cleaned `UserPreference` values into these modules. The recommender does not know about HTML, images, routes, or cart rendering.
 
-Co-ordering-based collaborative filtering:
+### `web/state.rs`
 
-- Builds an item-item co-order matrix from historical orders.
-- Counts dishes that appear together.
-- Normalises co-order score between `0.0` and `1.0`.
+Web-facing application state:
 
-### `recommender/hybrid.rs`
+- Holds loaded dishes and historical order logs.
+- Holds live in-memory orders created by checkout.
+- Tracks dish availability for admin management.
+- Converts domain models into frontend-friendly view models.
+- Resolves local dish image URLs.
+- Builds recommendation API responses with detailed explanations.
 
-Recommendation orchestration:
+### `web/routes.rs`
 
-- Applies disliked ingredient exclusion.
-- Calculates ingredient and co-order scores.
-- Combines them into a hybrid score.
-- Stores matched liked ingredients, matched preferred tags, related selected dish IDs, and simple evaluation stats for transparent Evaluation-page explanations.
+URL declaration only. It does not render HTML or implement business logic.
 
-Default hybrid formula:
+### `web/handlers/`
 
-```text
-final_score = 0.4 * ingredient_score + 0.6 * co_order_score
-```
+Focused request handlers:
 
-Adaptive behaviour:
+- `menu.rs`: customer menu page.
+- `cart.rs`: cart page and checkout endpoint.
+- `orders.rs`: customer orders page.
+- `admin.rs`: admin dashboard, order status updates, dish management, CSV import/export.
+- `recommendations.rs`: recommendation API bridge.
 
-- If no selected dishes are entered, ingredient score is used more heavily.
-- If no preferences are entered, co-order score is used more heavily.
-- If both are available, the normal hybrid score is used.
+### `web/templates.rs`
 
-### `search.rs`
+Server-rendered HTML:
 
-Menu filtering service:
+- Customer menu.
+- Preference panel.
+- Recommendation cards.
+- Dish cards and dish detail modal.
+- Cart/orders pages.
+- Admin dashboard, live orders, dish management, CSV tools, and recommendation tester.
 
-- Parses multi-term search input.
-- Supports `Match Any` and `Match All`.
-- Searches dish ID, name, category, ingredients, and tags.
+Templates receive prepared view models. They do not load CSV files or run recommendation algorithms.
 
-This is separate from UI code so it can be tested directly.
+### `static/`
 
-### `preferences.rs`
+Frontend assets:
 
-Selectable preference option extraction:
+- `app.css`: orange/white mobile-first theme.
+- `app.js`: small browser controller for interaction.
 
-- Extracts all unique ingredients from loaded dishes.
-- Extracts all unique tags from loaded dishes.
-- Normalizes options by trimming and lowercasing.
-- Sorts options alphabetically for predictable GUI display.
+The frontend is intentionally simple. There is no heavy JavaScript framework.
 
-This keeps preference option generation outside rendering code.
+## Data Boundaries
 
-### `image_loader.rs`
+- CSV loading and export stay in `data_loader.rs`.
+- Recommendation scoring stays in `recommender/`.
+- Mutable web session state stays in `WebState`.
+- HTTP request handling stays in `web/handlers/`.
+- HTML construction stays in `web/templates.rs`.
 
-Local dish image loading and caching:
+This separation keeps the FYP prototype explainable and easier to extend.
 
-- Creates `assets/dishes/` at startup.
-- Uses optional `image_path` when present.
-- Falls back to `assets/dishes/{dish_id}.jpg`, `.png`, and `.jpeg`.
-- Decodes local JPG/PNG files into egui textures.
-- Caches textures by dish ID so images are not reloaded every frame.
-- Returns a missing-image state so the GUI can show a `No image` placeholder.
+## Current Persistence Model
 
-This module does not contain CSV parsing, recommendation scoring, image downloading, or UI page logic.
+- Startup data comes from `data/dishes.csv` and `data/orders.csv`.
+- Admin dish changes are in memory for the running server session.
+- Admin CSV export downloads the current in-memory state.
+- Checkout creates live in-memory orders.
+- Historical order CSV import replaces historical logs in memory and immediately affects collaborative/hybrid recommendation results.
 
-### `simulation.rs`
+This is deliberate for a prototype: it demonstrates the workflow without adding database complexity.
 
-Admin/demo order simulation:
+## Extension Points
 
-- Parses manually entered dish IDs for the admin/demo simulation tool.
-- Validates them against known menu IDs.
-- Adds a simulated order to in-memory order history.
-- Optionally appends the order to `data/orders.csv`.
-
-Simulation is intentionally outside normal menu browsing because it represents demo/testing behaviour, not a normal customer action.
-
-### `gui/`
-
-GUI modules:
-
-- `app.rs`: eframe application loop and navigation.
-- `state.rs`: UI state and refresh methods.
-- `pages.rs`: page rendering.
-- `components.rs`: reusable visual helpers.
-- `mod.rs`: module exports.
-
-Dish thumbnails are rendered only by customer-facing components used in:
-
-- Explore & Recommend menu cards.
-- Evaluation recommendation result cards.
-
-Dashboard, preferences, admin/demo tools, and page headers do not call the image loader.
-
-## Responsive Layout
-
-The main input workflow is **Explore & Recommend**.
-
-- Wide windows show menu browsing beside preference and cart panels.
-- Narrow windows stack the same panels vertically.
-- Scroll areas prevent the interface from overflowing on common laptop resolutions such as 1366x768.
-- Recommendation results are shown on **Evaluation** so input collection and output analysis stay visually separate.
-
-The layout uses a small threshold only to decide whether to split into columns. The content itself uses flexible egui sizing and scroll areas.
-
-## Extending the System
-
-Recommended extension points:
-
-- Add more dish rows in `data/dishes.csv`.
-- Add more historical orders in `data/orders.csv`.
-- Adjust scoring constants in `recommender/hybrid.rs` if the FYP evaluation requires different weights.
-
-Avoid placing recommendation logic inside GUI rendering functions. Add or update services first, then call them from `gui::state` or `gui::pages`.
+- Add a real `price` column to `dishes.csv`.
+- Persist admin dish changes back to CSV automatically.
+- Add QR/table/session identifiers.
+- Store checkout orders in a database.
+- Add authentication for admin pages.
+- Add richer evaluation metrics for the FYP report.

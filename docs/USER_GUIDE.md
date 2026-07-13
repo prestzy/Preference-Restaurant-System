@@ -1,175 +1,166 @@
 # User Guide
 
-## Starting the App
-
-Run:
+## Start the Web App
 
 ```powershell
 cargo run
 ```
 
-The desktop window opens after CSV data is loaded.
-
-## Dashboard
-
-The Dashboard gives a short explanation of the system and shows the number of loaded dishes and historical orders.
-
-## Explore & Recommend
-
-This is the main user workflow.
-
-### Browse the Menu
-
-The menu shows dish cards with:
-
-- Dish image or `No image` placeholder.
-- Dish ID.
-- Dish name.
-- Category.
-- Ingredients.
-- Tags.
-- **Select Dish** button.
-
-### Search the Menu
-
-Use the menu search box to filter by:
-
-- Dish ID.
-- Dish name.
-- Category.
-- Ingredient.
-- Tag.
-
-Multiple terms can be separated using:
+Open:
 
 ```text
-comma, semicolon; pipe | newline
+http://127.0.0.1:3000/
 ```
 
-Examples:
+The app is bound to localhost for development. For phone testing from another device, the bind address would need to be changed later.
+
+## Customer Menu
+
+The Home page is the QR customer menu.
+
+Customers can:
+
+- Search by dish name, dish ID, ingredient, category, or tag.
+- Filter by category chips.
+- Select liked ingredients, disliked ingredients, and preferred tags.
+- View “Recommended for You”.
+- Open dish details.
+- Add dishes to the cart.
+- Place a prototype order.
+
+The recommendation section updates after preference chips change or cart contents change.
+
+## Preference Chips
+
+Preference options are generated from the loaded dish dataset:
+
+- Liked Ingredients
+- Disliked Ingredients
+- Preferred Tags
+
+If an ingredient is selected as liked, it is removed from disliked, and the opposite also applies. This avoids sending contradictory preference data to the recommender.
+
+## Dish Details
+
+Click **Details** on a menu or recommendation card.
+
+The detail modal shows:
+
+- local image or placeholder
+- dish ID
+- category
+- ingredients
+- tags
+- price placeholder
+- recommendation reason when the dish is recommended
+- Add to Cart button
+
+## Cart and Checkout
+
+Open:
 
 ```text
-chicken, spicy
-rice; signature
-D01 | main
+http://127.0.0.1:3000/cart
 ```
 
-Search modes:
+The cart uses browser `localStorage` for the prototype. Customers can:
 
-- **Match Any**: show dishes matching at least one term.
-- **Match All**: show dishes matching every term.
+- increase quantity
+- decrease quantity
+- remove item
+- view subtotal and total
+- place a prototype order
 
-Active filter tokens appear below the search field.
-
-### Select Dishes
-
-Click **Select Dish** on menu cards. Selected dishes appear in the **Selected Dishes** section and are passed directly into the recommendation engine as the current order context.
-
-### Enter Preferences
-
-Preference options are generated from the loaded menu data.
-
-Use the selectable chips under:
-
-- **Liked Ingredients**
-- **Disliked Ingredients**
-- **Preferred Tags**
-
-The same ingredient cannot stay in both liked and disliked lists. If you select an ingredient as liked, it is removed from disliked. If you select it as disliked, it is removed from liked.
-
-Recommendations refresh automatically when selected preference chips or selected dishes change.
-
-### View Recommendations
-
-Recommendation results are shown on the **Evaluation** page, not on Explore & Recommend. This keeps Explore focused on menu browsing, preference selection, and the cart.
-
-Each recommendation card shows:
-
-- Dish image or `No image` placeholder.
-- Dish name and ID.
-- Ingredient score.
-- Co-order score.
-- Final hybrid score.
-- Matched liked ingredients.
-- Matched preferred tags.
-- Disliked ingredient exclusion status.
-- Selected dish that influenced the co-order score.
-- Plain-language explanation.
-
-Example:
+Checkout sends selected dish IDs to:
 
 ```text
-Recommended because it contains preferred ingredient(s): chicken and often ordered with selected dish(es): D01.
+POST /api/orders
 ```
 
-## Evaluation
+The server validates dish IDs and creates a live in-memory order.
 
-The Evaluation page shows recommendation output and lightweight prototype testing values:
+## Admin Page
 
-- Recommendation cards with detailed score explanations.
-- Number of available recommendations.
-- Dishes evaluated after filtering.
-- Dishes excluded due to disliked ingredients.
-- Already selected dishes skipped.
-- Category diversity count in the top 5 recommendations.
-
-These are demo support metrics, not a full academic recommender-system evaluation.
-
-## Dish Images
-
-Dish thumbnails are optional. They are shown only in:
-
-- Explore & Recommend menu dish cards.
-- Evaluation recommendation result cards.
-
-To add an image, place a local file in:
+Open:
 
 ```text
-assets/dishes/
+http://127.0.0.1:3000/admin
 ```
 
-Use the dish ID as the filename when possible:
+Admin tools include:
 
-```text
-assets/dishes/D01.jpg
-assets/dishes/D01.png
-assets/dishes/D01.jpeg
-```
+- dashboard metrics
+- most frequent dishes
+- common co-order pairs
+- live order table
+- live order status update
+- dish management
+- CSV import/export
+- recommendation testing
+- historical order table
 
-If you add a custom path in an optional `image_path` column in `data/dishes.csv`,
-the app will try that first. If no image is found, it shows `No image` and the
-prototype continues normally.
+## Live Orders
 
-Click a dish thumbnail in either the menu or Recommendation Results to open a
-larger preview. The same preview window is reused in both places, and missing
-images simply keep the placeholder behavior.
+Place a customer order from the cart, then open the Admin page.
 
-Record the image source and license in:
+The new order appears under **Live Orders**. Staff can change status:
 
-```text
-assets/dish_image_sources.csv
-```
+- Pending
+- Preparing
+- Ready
+- Completed
+- Cancelled
 
-## Admin / Demo Tools
+Live orders are in memory for the current server session.
 
-Order simulation is placed in a separate admin/demo section because it is not a normal customer step.
+## Dish Management
 
-Use it to create a simulated order such as:
+The Admin page can add or update dishes in memory.
 
-```text
-D01, D09, D30
-```
+Fields:
 
-After insertion:
+- Dish ID, optional
+- Dish name
+- Category
+- Ingredients
+- Tags
+- Image path
 
-- The order is added to memory.
-- Collaborative filtering uses the new order immediately.
-- Recommendations refresh.
+If Dish ID is blank, the system generates the next `Dxx` ID. Use CSV export if you want to save the current in-memory dish list.
 
-You may also enable:
+## CSV Tools
 
-```text
-Also append simulated order to data/orders.csv
-```
+Admin CSV tools support:
 
-If CSV append fails, the in-memory demo order still remains active for the current session.
+- import dishes CSV
+- export dishes CSV
+- import historical orders CSV
+- export historical orders CSV
+
+Imports replace the matching in-memory dataset for the current server session.
+
+## Recommendation Testing
+
+The Admin page includes a recommendation testing section.
+
+Select:
+
+- liked ingredients
+- disliked ingredients
+- preferred tags
+- selected dish/order context
+
+Click **Run Recommendation Test**.
+
+The result table shows:
+
+- dish name
+- content score
+- co-order score
+- hybrid score
+- explanation
+- matched liked ingredients
+- matched preferred tags
+- co-order influence
+
+This section is useful for FYP demonstration and evaluation discussion.
