@@ -648,10 +648,32 @@ fn recommendation_tester(options: &PreferenceOptions, dishes: &[DishView]) -> St
             {}
             <label class="field-label">Selected dish/order context</label>
             <select id="admin-selected-dishes" multiple>{dish_options}</select>
+            <div class="admin-form compact-form">
+                <label class="field-label">Time Context
+                    <select id="admin-time-context">
+                        <option value="Any">Any</option>
+                        <option value="Breakfast">Breakfast</option>
+                        <option value="Lunch">Lunch</option>
+                        <option value="Dinner">Dinner</option>
+                        <option value="Snack">Dessert / Snack</option>
+                    </select>
+                </label>
+                <label class="field-label">Ranking Method
+                    <select id="admin-ranking-method">
+                        <option value="hybrid">Hybrid</option>
+                        <option value="content-based">Content-based</option>
+                        <option value="co-ordering">Co-ordering</option>
+                    </select>
+                </label>
+            </div>
             <button class="primary-action" type="button" id="run-admin-recommendations">Run Recommendation Test</button>
+            <div class="reason-box">
+                <strong>Scoring formula</strong>
+                <p>Hybrid score = 0.45 content + 0.25 co-order + 0.20 popularity + 0.10 time/business. Disliked ingredients are excluded before ranking.</p>
+            </div>
             <div class="table-wrap recommendation-results-wrap">
                 <table>
-                    <thead><tr><th>Dish</th><th>Content</th><th>Co-order</th><th>Hybrid</th><th>Reason</th></tr></thead>
+                    <thead><tr><th>Dish</th><th>Category</th><th>Content</th><th>Co-order</th><th>Popularity</th><th>Time</th><th>Hybrid</th><th>Support</th><th>Confidence</th><th>Lift</th><th>Reason</th></tr></thead>
                     <tbody id="admin-recommendation-results"></tbody>
                 </table>
             </div>

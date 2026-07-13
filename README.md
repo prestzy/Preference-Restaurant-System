@@ -20,6 +20,9 @@ The project direction is now QR-based ordering: customers scan a QR code with th
 - Completed checkout orders are added immediately to Historical Orders for the current server session.
 - Staff/admin page for dashboard metrics, live order status, dish management, historical orders, and recommendation testing.
 - CSV-based data loading, import, and export.
+- Popularity fallback so recommendations do not go empty when preference input is limited.
+- Association-rule metrics for co-ordering: support, confidence, and lift.
+- Simple time-context boost for breakfast, lunch, dinner, and snack/dessert testing.
 
 ## Run Locally
 
@@ -81,8 +84,16 @@ The recommender stays lightweight and explainable:
 
 - Ingredient/content filtering uses liked ingredients, disliked ingredients, and preferred tags.
 - Collaborative filtering builds an item-item co-order matrix from `orders.csv`.
-- Hybrid scoring combines content and co-order scores.
-- Result cards and the admin recommendation tester show score breakdowns and plain-language explanations.
+- Popularity fallback uses historical/completed order frequency.
+- Association metrics calculate support, confidence, and lift for selected dish to candidate dish.
+- Time-context rules add a small explainable business boost.
+- Hybrid scoring uses:
+
+```text
+0.45 content + 0.25 co-order + 0.20 popularity + 0.10 time/business
+```
+
+- Result cards and the admin recommendation tester show score breakdowns, association metrics, and plain-language explanations.
 
 No heavy machine learning libraries are used.
 
@@ -90,7 +101,7 @@ No heavy machine learning libraries are used.
 
 - `src/models.rs`: data structures only.
 - `src/data_loader.rs`: CSV loading/import/export helpers.
-- `src/recommender/`: content, collaborative, and hybrid recommendation logic.
+- `src/recommender/`: content, collaborative, association metrics, popularity, time context, and hybrid recommendation logic.
 - `src/web/state.rs`: shared web state and view-model preparation.
 - `src/web/routes.rs`: Axum route declarations.
 - `src/web/handlers/`: focused HTTP handlers for menu, cart, orders, admin, and recommendations.
@@ -107,4 +118,4 @@ cargo check
 cargo test
 ```
 
-Tests cover CSV parsing/validation, search/filter logic, preference option extraction, recommendation behavior, checkout/live orders, completed order lifecycle, image fallback, admin availability, and dish management state.
+Tests cover CSV parsing/validation, search/filter logic, preference option extraction, recommendation behavior, popularity fallback, association metrics, hybrid scoring, checkout/live orders, completed order lifecycle, image fallback, admin availability, and dish management state.

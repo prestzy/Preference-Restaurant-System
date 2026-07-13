@@ -277,6 +277,9 @@ function collectPreferences(scope) {
     preferences.selected_dish_ids = Array.from(
       document.getElementById("admin-selected-dishes")?.selectedOptions || []
     ).map((option) => option.value);
+    preferences.time_context = document.getElementById("admin-time-context")?.value || "Any";
+    preferences.ranking_method =
+      document.getElementById("admin-ranking-method")?.value || "hybrid";
   }
 
   return preferences;
@@ -438,7 +441,7 @@ function showDishDetail(dishId) {
             ? `<div class="reason-box">
                 <strong>Recommendation reason</strong>
                 <p>${escapeHtml(recommendation.explanation)}</p>
-                <p>Content ${recommendation.content_score.toFixed(2)} · Co-order ${recommendation.co_order_score.toFixed(2)} · Hybrid ${recommendation.hybrid_score.toFixed(2)}</p>
+                <p>Content ${recommendation.content_score.toFixed(2)} · Co-order ${recommendation.co_order_score.toFixed(2)} · Popularity ${recommendation.popularity_score.toFixed(2)} · Time ${recommendation.business_rule_score.toFixed(2)} · Hybrid ${recommendation.hybrid_score.toFixed(2)}</p>
               </div>`
             : ""
         }
@@ -849,15 +852,21 @@ function setupAdminRecommendationTester() {
   }
 
   button.addEventListener("click", async () => {
-    tableBody.innerHTML = `<tr><td colspan="5">Running recommendation test...</td></tr>`;
+    tableBody.innerHTML = `<tr><td colspan="11">Running recommendation test...</td></tr>`;
     const result = await requestRecommendations(collectPreferences("admin"));
     const rows = (result.recommendations || []).slice(0, 12).map((item) => {
       return `
         <tr>
           <td><strong>${escapeHtml(item.dish.name)}</strong><span>${escapeHtml(item.dish.dish_id)}</span></td>
+          <td>${escapeHtml(item.dish.category)}</td>
           <td>${item.content_score.toFixed(2)}</td>
           <td>${item.co_order_score.toFixed(2)}</td>
+          <td>${item.popularity_score.toFixed(2)}</td>
+          <td>${item.business_rule_score.toFixed(2)}</td>
           <td>${item.hybrid_score.toFixed(2)}</td>
+          <td>${item.association_support.toFixed(2)}<span>${item.association_pair_count} pair(s)</span></td>
+          <td>${item.association_confidence.toFixed(2)}</td>
+          <td>${item.association_lift.toFixed(2)}<span>${escapeHtml(item.association_base_dish_id || "-")}</span></td>
           <td>
             ${escapeHtml(item.explanation)}
             <br><span class="muted">Liked: ${escapeHtml(formatList(item.matched_liked_ingredients))}</span>
@@ -869,7 +878,7 @@ function setupAdminRecommendationTester() {
     });
     tableBody.innerHTML = rows.length
       ? rows.join("")
-      : `<tr><td colspan="5">No recommendation evidence for this test input.</td></tr>`;
+      : `<tr><td colspan="11">No recommendation evidence for this test input.</td></tr>`;
   });
 }
 

@@ -473,8 +473,15 @@ impl WebState {
             dish: DishView::from_dish(&result.dish, true, true),
             content_score: result.ingredient_score,
             co_order_score: result.co_order_score,
+            popularity_score: result.popularity_score,
+            business_rule_score: result.business_rule_score,
             hybrid_score: result.final_score,
             explanation: detailed_recommendation_reason(result, &related_selected_dishes),
+            association_base_dish_id: result.association_base_dish_id.clone(),
+            association_pair_count: result.association_pair_count,
+            association_support: result.association_support,
+            association_confidence: result.association_confidence,
+            association_lift: result.association_lift,
             matched_liked_ingredients: result.matched_liked_ingredients.clone(),
             matched_preferred_tags: result.matched_preferred_tags.clone(),
             matched_disliked_ingredients: result.matched_disliked_ingredients.clone(),
@@ -623,8 +630,15 @@ pub struct RecommendationView {
     pub dish: DishView,
     pub content_score: f32,
     pub co_order_score: f32,
+    pub popularity_score: f32,
+    pub business_rule_score: f32,
     pub hybrid_score: f32,
     pub explanation: String,
+    pub association_base_dish_id: Option<String>,
+    pub association_pair_count: u32,
+    pub association_support: f32,
+    pub association_confidence: f32,
+    pub association_lift: f32,
     pub matched_liked_ingredients: Vec<String>,
     pub matched_preferred_tags: Vec<String>,
     pub matched_disliked_ingredients: Vec<String>,
@@ -662,29 +676,21 @@ pub struct RecommendationRequest {
     pub preferred_tags: Vec<String>,
     #[serde(default)]
     pub selected_dish_ids: Vec<String>,
+    #[serde(default)]
+    pub time_context: Option<String>,
+    #[serde(default)]
+    pub ranking_method: Option<String>,
 }
 
 impl RecommendationRequest {
     fn into_user_preference_or_default(self) -> UserPreference {
-        let is_empty = self.liked_ingredients.is_empty()
-            && self.disliked_ingredients.is_empty()
-            && self.preferred_tags.is_empty()
-            && self.selected_dish_ids.is_empty();
-
-        if is_empty {
-            return UserPreference {
-                liked_ingredients: vec!["chicken".to_string(), "rice".to_string()],
-                disliked_ingredients: Vec::new(),
-                preferred_tags: vec!["signature".to_string(), "spicy".to_string()],
-                selected_dish_ids: Vec::new(),
-            };
-        }
-
         UserPreference {
             liked_ingredients: normalize_list(self.liked_ingredients, false),
             disliked_ingredients: normalize_list(self.disliked_ingredients, false),
             preferred_tags: normalize_list(self.preferred_tags, false),
             selected_dish_ids: normalize_list(self.selected_dish_ids, true),
+            time_context: self.time_context,
+            ranking_method: self.ranking_method,
         }
     }
 }
@@ -881,19 +887,39 @@ fn detailed_recommendation_reason(
         ));
     }
 
+    if result.association_lift > 0.0 {
+        reasons.push(format!(
+            "association metrics show pair count {}, support {:.2}, confidence {:.2}, lift {:.2}",
+            result.association_pair_count,
+            result.association_support,
+            result.association_confidence,
+            result.association_lift
+        ));
+    }
+
+    if result.popularity_score > 0.0 {
+        reasons.push("popular dish based on historical orders".to_string());
+    }
+
+    if result.business_rule_score > 0.0 {
+        reasons.push("matches the selected time/menu context".to_string());
+    }
+
     if reasons.is_empty() {
         format!(
-            "{} is recommended by hybrid score {:.2}.",
+            "{} is recommended by hybrid score {:.2}. Formula: 0.45 content + 0.25 co-order + 0.20 popularity + 0.10 time/business.",
             result.dish.name, result.final_score
         )
     } else {
         format!(
-            "{} is recommended because it {}. Hybrid score {:.2} = content {:.2} + co-order {:.2}.",
+            "{} is recommended because it {}. Hybrid score {:.2} = content {:.2}, co-order {:.2}, popularity {:.2}, time/business {:.2}.",
             result.dish.name,
             reasons.join("; "),
             result.final_score,
             result.ingredient_score,
-            result.co_order_score
+            result.co_order_score,
+            result.popularity_score,
+            result.business_rule_score
         )
     }
 }

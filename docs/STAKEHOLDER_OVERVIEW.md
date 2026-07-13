@@ -44,8 +44,11 @@ Algorithms:
 - content/ingredient-based filtering
 - co-order collaborative filtering
 - hybrid scoring
+- popularity fallback
+- association-rule metrics: support, confidence, and lift
+- simple time-context boosting for breakfast, lunch, dinner, and snack/dessert
 
-Recommendation cards and the admin tester show the reason and score breakdown so a lecturer or stakeholder can understand why a dish was suggested.
+Recommendation cards and the admin tester show the reason, score breakdown, and co-order metrics so a lecturer or stakeholder can understand why a dish was suggested.
 
 ## Customer Experience
 

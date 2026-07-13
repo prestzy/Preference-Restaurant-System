@@ -10,7 +10,7 @@ This repository is a lightweight Rust web prototype for QR-based restaurant orde
 4. `web::routes` maps URLs to focused handlers.
 5. `web::handlers::*` process HTTP requests.
 6. `web::templates` renders server-side HTML.
-7. `static/app.js` handles browser-only interaction: live search suggestions, chips, cart quantities, modal details, checkout, admin CSV file preview, admin actions, and recommendation refresh.
+7. `static/app.js` handles browser-only interaction: live search suggestions, chips, cart quantities, modal details, checkout, admin actions, and recommendation refresh.
 8. `recommender::*` remains the only place where recommendation scoring is calculated.
 
 ## Module Responsibilities
@@ -40,7 +40,16 @@ Recommendation logic only:
 
 - `ingredient_filter.rs`: liked ingredient, disliked ingredient, and tag scoring.
 - `collaborative_filter.rs`: item-item co-order frequency matrix.
-- `hybrid.rs`: adaptive hybrid scoring and recommendation ranking.
+- `association_metrics.rs`: support, confidence, and lift for co-ordering.
+- `popularity.rs`: historical order frequency fallback scoring.
+- `time_context.rs`: simple breakfast/lunch/dinner/snack rule boost.
+- `hybrid.rs`: hybrid scoring and recommendation ranking.
+
+Hybrid scoring uses:
+
+```text
+0.45 content + 0.25 co-order + 0.20 popularity + 0.10 time/business
+```
 
 The web layer passes cleaned `UserPreference` values into these modules. The recommender does not know about HTML, images, routes, or cart rendering.
 

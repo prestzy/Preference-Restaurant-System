@@ -77,6 +77,8 @@ impl AppState {
             disliked_ingredients: sorted_set_values(&self.selected_disliked_ingredients),
             preferred_tags: sorted_set_values(&self.selected_preferred_tags),
             selected_dish_ids: self.selected_dish_ids(),
+            time_context: None,
+            ranking_method: None,
         }
     }
 

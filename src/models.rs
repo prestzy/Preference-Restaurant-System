@@ -85,6 +85,14 @@ pub struct UserPreference {
     pub disliked_ingredients: Vec<String>,
     pub preferred_tags: Vec<String>,
     pub selected_dish_ids: Vec<String>,
+    /// Optional time context such as lunch or dinner for rule-based boosting.
+    pub time_context: Option<String>,
+    /// Optional ranking method used by the admin tester.
+    ///
+    /// Customer recommendations usually use `hybrid`; admin testing can ask for
+    /// content-only or co-order-only output without changing the recommender API
+    /// shape.
+    pub ranking_method: Option<String>,
 }
 
 impl UserPreference {
@@ -118,7 +126,14 @@ pub struct RecommendationResult {
     pub dish: Dish,
     pub ingredient_score: f32,
     pub co_order_score: f32,
+    pub popularity_score: f32,
+    pub business_rule_score: f32,
     pub final_score: f32,
+    pub association_base_dish_id: Option<String>,
+    pub association_pair_count: u32,
+    pub association_support: f32,
+    pub association_confidence: f32,
+    pub association_lift: f32,
     pub matched_liked_ingredients: Vec<String>,
     pub matched_preferred_tags: Vec<String>,
     pub matched_disliked_ingredients: Vec<String>,

@@ -158,18 +158,34 @@ Select:
 - disliked ingredients
 - preferred tags
 - selected dish/order context
+- time context: Any, Breakfast, Lunch, Dinner, or Dessert/Snack
+- ranking method: hybrid, content-based, or co-ordering
 
 Click **Run Recommendation Test**.
 
 The result table shows:
 
-- dish name
+- dish ID and name
+- category
 - content score
 - co-order score
+- popularity score
+- time/business score
 - hybrid score
+- support
+- confidence
+- lift
 - explanation
 - matched liked ingredients
 - matched preferred tags
 - co-order influence
+
+Hybrid scoring uses:
+
+```text
+0.45 content + 0.25 co-order + 0.20 popularity + 0.10 time/business
+```
+
+Popularity fallback keeps recommendations visible when the customer has not selected preferences or cart context. Association metrics help explain co-ordering evidence for FYP screenshots and Chapter 4 discussion.
 
 This section is useful for FYP demonstration and evaluation discussion.
