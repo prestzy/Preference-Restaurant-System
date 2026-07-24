@@ -12,8 +12,22 @@ use tower_http::services::ServeDir;
 pub fn router(state: WebState) -> Router {
     Router::new()
         .route("/", get(handlers::menu::customer_menu))
+        .route(
+            "/start",
+            get(handlers::customer::start_page).post(handlers::customer::start_submit),
+        )
+        .route(
+            "/profile",
+            get(handlers::customer::profile_page).post(handlers::customer::profile_submit),
+        )
+        .route("/profile/end", post(handlers::customer::end_session))
         .route("/cart", get(handlers::cart::cart_page))
         .route("/orders", get(handlers::orders::orders_page))
+        .route(
+            "/admin/login",
+            get(handlers::admin::admin_login_page).post(handlers::admin::admin_login_submit),
+        )
+        .route("/admin/logout", get(handlers::admin::admin_logout))
         .route("/admin", get(handlers::admin::admin_page))
         .route("/admin/orders", get(handlers::admin::admin_orders_page))
         .route("/admin/dishes", get(handlers::admin::admin_dishes_page))
@@ -21,9 +35,20 @@ pub fn router(state: WebState) -> Router {
             "/admin/recommendations",
             get(handlers::admin::admin_recommendations_page),
         )
-        .route("/admin/data", get(handlers::admin::admin_data_page))
+        .route(
+            "/admin/evaluation",
+            get(handlers::admin::admin_evaluation_page),
+        )
+        .route("/admin/maintenance", get(handlers::admin::admin_data_page))
         .route("/admin/insights", get(handlers::admin::admin_insights_page))
         .route("/api/orders", post(handlers::cart::create_order))
+        .route("/api/orders/my", get(handlers::orders::my_orders))
+        .route("/api/search", get(handlers::search::menu_search))
+        .route("/api/profile/orders", get(handlers::orders::profile_orders))
+        .route(
+            "/api/customer/orders",
+            get(handlers::orders::profile_orders),
+        )
         .route(
             "/api/recommendations",
             post(handlers::recommendations::recommendations),
@@ -37,10 +62,23 @@ pub fn router(state: WebState) -> Router {
             get(handlers::assistant::admin_insights),
         )
         .route(
+            "/api/admin/simulation",
+            post(handlers::admin::run_simulation),
+        )
+        .route(
+            "/api/admin/experiment-lab",
+            post(handlers::admin::run_experiment_lab),
+        )
+        .route("/api/admin/orders", get(handlers::admin::admin_orders_sync))
+        .route(
             "/api/admin/orders/:order_id/status",
             post(handlers::admin::update_order_status),
         )
         .route("/api/admin/dishes", post(handlers::admin::upsert_dish))
+        .route(
+            "/api/admin/dishes/:dish_id",
+            get(handlers::admin::get_dish).put(handlers::admin::update_dish),
+        )
         .route(
             "/api/admin/dishes/:dish_id/delete",
             post(handlers::admin::delete_dish),

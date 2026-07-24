@@ -1,5 +1,6 @@
 const CART_KEY = "fyp_web_cart_v1";
 const LAST_ORDER_KEY = "fyp_last_order_id_v1";
+const CUSTOMER_KEY = "fyp_customer_identity_v1";
 
 function readCart() {
   try {
@@ -13,6 +14,16 @@ function writeCart(cart) {
   localStorage.setItem(CART_KEY, JSON.stringify(cart));
   updateCartCount();
   refreshCustomerRecommendations();
+}
+
+function readCustomerIdentity() {
+  return window.CUSTOMER_SESSION || {};
+}
+
+function writeCustomerIdentity(identity) {
+  // Kept only as a harmless browser mirror for older pages. The server-side
+  // customer cookie/session is now the authority for checkout and profile.
+  localStorage.setItem(CUSTOMER_KEY, JSON.stringify(identity));
 }
 
 function cartCount(cart = readCart()) {
@@ -147,58 +158,135 @@ function parseSearchTerms(query) {
   return String(query || "")
     .toLowerCase()
     .split(/[,;\n|]+|\s{2,}/)
-    .map((term) => term.trim())
+    .map(normalizeSearchTerm)
     .filter(Boolean);
 }
 
-function setupMenuFiltering() {
-  const searchInput = document.getElementById("search-input");
-  const cards = Array.from(document.querySelectorAll(".dish-card"));
-  const visibleCount = document.getElementById("visible-count");
-  const suggestions = document.getElementById("search-suggestions");
-  let activeCategory = "all";
+function normalizeSearchTerm(term) {
+  const cleaned = String(term || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (cleaned === "noodles") return "noodle";
+  if (cleaned === "fruits") return "fruit";
+  if (cleaned === "chillies" || cleaned === "chilli") return "chili";
+  if (cleaned.endsWith("s") && cleaned.length > 4) return cleaned.slice(0, -1);
+  return cleaned;
+}
 
-  if (!cards.length) {
+function expandedSearchGroups(terms) {
+  const vocab = window.SEARCH_VOCABULARY || { aliases: {}, concepts: {} };
+  return terms.map((rawTerm) => {
+    const term = normalizeSearchTerm(rawTerm);
+    const values = new Set([term]);
+    const reasons = new Map();
+    Object.entries(vocab.aliases || {}).forEach(([canonical, aliases]) => {
+      const normalizedCanonical = normalizeSearchTerm(canonical);
+      const normalizedAliases = (aliases || []).map(normalizeSearchTerm);
+      if (term === normalizedCanonical || normalizedAliases.includes(term)) {
+        values.add(normalizedCanonical);
+        reasons.set(normalizedCanonical, term === normalizedCanonical ? `exact term: ${term}` : `${term} interpreted as ${normalizedCanonical}`);
+        normalizedAliases.forEach((alias) => values.add(alias));
+      }
+    });
+    Object.entries(vocab.concepts || {}).forEach(([concept, members]) => {
+      const normalizedConcept = normalizeSearchTerm(concept);
+      const normalizedMembers = (members || []).map(normalizeSearchTerm);
+      if (term === normalizedConcept || normalizedMembers.includes(term)) {
+        values.add(normalizedConcept);
+        normalizedMembers.forEach((member) => {
+          values.add(member);
+          if (term !== member) {
+            reasons.set(member, `${member} belongs to ${normalizedConcept} concept`);
+          }
+        });
+      }
+    });
+    return { raw: term, values: Array.from(values), reasons };
+  });
+}
+
+function smartSearchResult(dish, groups, mode = "all") {
+  if (!groups.length) {
+    return { matched: true, score: 0, reasons: [] };
+  }
+  const name = normalizeSearchTerm(dish.name || "");
+  const id = normalizeSearchTerm(dish.dish_id || "");
+  const category = normalizeSearchTerm(dish.category || "");
+  const ingredients = (dish.ingredients || []).map(normalizeSearchTerm);
+  const tags = (dish.tags || []).map(normalizeSearchTerm);
+  const groupResults = groups.map((group) => {
+    let best = null;
+    for (const value of group.values) {
+      let candidate = null;
+      if (name === value || id === value) candidate = { score: 100, reason: `exact dish match: ${dish.name}` };
+      else if (name.startsWith(value)) candidate = { score: 80, reason: `dish name starts with ${value}` };
+      else if (name.includes(value)) candidate = { score: 65, reason: `dish name contains ${value}` };
+      else if (ingredients.includes(value)) candidate = { score: value === group.raw ? 55 : 48, reason: group.reasons.get(value) || `ingredient: ${value}` };
+      else if (tags.includes(value)) candidate = { score: value === group.raw ? 45 : 38, reason: group.reasons.get(value) || `tag: ${value}` };
+      else if (ingredients.some((ingredient) => ingredient.includes(value))) candidate = { score: 38, reason: group.reasons.get(value) || `ingredient concept: ${value}` };
+      else if (tags.some((tag) => tag.includes(value))) candidate = { score: 38, reason: group.reasons.get(value) || `tag concept: ${value}` };
+      else if (category.includes(value)) candidate = { score: 30, reason: `category: ${dish.category}` };
+      if (candidate && (!best || candidate.score > best.score)) {
+        best = candidate;
+      }
+    }
+    return best;
+  });
+  const matched = mode === "any" ? groupResults.some(Boolean) : groupResults.every(Boolean);
+  const score = groupResults.reduce((sum, item) => sum + (item?.score || 0), 0) + Math.min(10, Number(dish.price_amount || 0) % 10);
+  const reasons = groupResults.filter(Boolean).map((item) => item.reason);
+  return { matched, score, reasons };
+}
+
+function setupDishLocator() {
+  // Search is a locator only. It calls the Rust search API to populate the
+  // suggestion dropdown, then suggestion clicks scroll to the existing static
+  // Menu card. This function intentionally never changes Menu card visibility,
+  // Menu card order, or the server-rendered Menu count.
+  const searchInput = document.getElementById("search-input");
+  const suggestions = document.getElementById("search-suggestions");
+  let latestSearch = { query: "", results: [] };
+  let searchSequence = 0;
+
+  if (!searchInput || !suggestions) {
     return;
   }
 
-  const applyFilters = () => {
-    const terms = parseSearchTerms(searchInput?.value || "");
-    let count = 0;
+  const updateSuggestions = async () => {
+    const query = searchInput.value || "";
+    const hasQuery = parseSearchTerms(query).length > 0;
+    const sequence = ++searchSequence;
 
-    cards.forEach((card) => {
-      const searchText = card.dataset.search || "";
-      const matchesSearch =
-        !terms.length || terms.every((term) => searchText.includes(term));
-      const matchesCategory =
-        activeCategory === "all" || card.dataset.category === activeCategory;
-      const visible = matchesSearch && matchesCategory;
-      card.hidden = !visible;
-      if (visible) {
-        count += 1;
-      }
-    });
-
-    if (visibleCount) {
-      visibleCount.textContent = count.toString();
+    if (!hasQuery) {
+      latestSearch = { query: "", results: [] };
+      renderSearchSuggestions(latestSearch, suggestions, false);
+      return;
     }
-    renderSearchSuggestions(terms, suggestions);
+
+    try {
+      const response = await fetch(`/api/search?q=${encodeURIComponent(query)}&mode=all`);
+      const payload = await response.json();
+      if (sequence !== searchSequence || !payload.ok || !payload.data) {
+        return;
+      }
+      latestSearch = payload.data;
+    } catch (error) {
+      console.error("Menu search failed", error);
+      return;
+    }
+    renderSearchSuggestions(latestSearch, suggestions, hasQuery);
   };
 
-  searchInput?.addEventListener("input", applyFilters);
+  const debouncedUpdateSuggestions = debounce(updateSuggestions, 160);
+  searchInput?.addEventListener("input", debouncedUpdateSuggestions);
 
-  document.querySelectorAll("[data-category-chip]").forEach((chip) => {
-    chip.addEventListener("click", () => {
-      document
-        .querySelectorAll("[data-category-chip]")
-        .forEach((item) => item.classList.remove("active"));
-      chip.classList.add("active");
-      activeCategory = chip.dataset.categoryChip.toLowerCase();
-      applyFilters();
-    });
-  });
+  renderSearchSuggestions(latestSearch, suggestions, false);
+}
 
-  applyFilters();
+function debounce(callback, delay) {
+  let timer = null;
+  return (...args) => {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => callback(...args), delay);
+  };
 }
 
 function setupCarouselControls() {
@@ -238,39 +326,34 @@ function setupCarouselControls() {
 }
 
 function setupOrderFilters() {
-  const cards = Array.from(document.querySelectorAll("[data-order-status-card]"));
-  if (!cards.length) {
-    return;
-  }
-
   document.querySelectorAll("[data-order-filter]").forEach((button) => {
+    if (button.dataset.orderFilterBound === "true") return;
+    button.dataset.orderFilterBound = "true";
     button.addEventListener("click", () => {
       document
         .querySelectorAll("[data-order-filter]")
         .forEach((item) => item.classList.remove("active"));
       button.classList.add("active");
       const filter = button.dataset.orderFilter;
-      cards.forEach((card) => {
+      document.querySelectorAll("[data-order-status-card]").forEach((card) => {
         card.hidden = filter !== "all" && card.dataset.orderStatusCard !== filter;
       });
     });
   });
 }
 
-function renderSearchSuggestions(terms, container) {
+function renderSearchSuggestions(searchResult, container, hasQuery) {
   if (!container) {
     return;
   }
 
-  if (!terms.length) {
+  if (!hasQuery) {
     container.hidden = true;
     container.innerHTML = "";
     return;
   }
 
-  const matches = (window.MENU_DISHES || [])
-    .filter((dish) => terms.every((term) => dishSearchHaystack(dish).includes(term)))
-    .slice(0, 6);
+  const matches = (searchResult.results || []).slice(0, 6);
 
   container.hidden = false;
   if (!matches.length) {
@@ -279,13 +362,14 @@ function renderSearchSuggestions(terms, container) {
   }
 
   container.innerHTML = matches
-    .map((dish) => {
+    .map((item) => {
+      const dish = item.dish;
       return `
         <button class="suggestion-item" type="button" data-suggestion-dish="${escapeHtml(dish.dish_id)}">
           ${imageHtml(dish, "suggestion-thumb")}
           <span>
             <strong>${escapeHtml(dish.name)}</strong>
-            <small>${escapeHtml(dish.category)} · ${escapeHtml(dish.price)} · ${escapeHtml(dishMatchReason(dish, terms))}</small>
+            <small>${escapeHtml(dish.category)} · ${escapeHtml(dish.price)} · ${escapeHtml((item.match_reasons || []).slice(0, 2).join("; ") || "menu match")}</small>
           </span>
         </button>
       `;
@@ -301,12 +385,13 @@ function renderSearchSuggestions(terms, container) {
 }
 
 function focusDishFromSuggestion(dishId) {
-  const card = document.querySelector(`.dish-card[data-dish-id="${CSS.escape(dishId)}"]`);
+  const card =
+    document.getElementById(`dish-${dishId}`) ||
+    document.querySelector(`.dish-card[data-dish-id="${CSS.escape(dishId)}"]`);
   if (card) {
-    card.hidden = false;
     card.scrollIntoView({ behavior: "smooth", block: "center" });
-    card.classList.add("focused");
-    window.setTimeout(() => card.classList.remove("focused"), 1400);
+    card.classList.add("dish-locator-highlight");
+    window.setTimeout(() => card.classList.remove("dish-locator-highlight"), 2000);
     return;
   }
 
@@ -350,7 +435,7 @@ function collectPreferences(scope) {
     preferences.selected_dish_ids = Object.keys(readCart());
   } else {
     preferences.selected_dish_ids = Array.from(
-      document.getElementById("admin-selected-dishes")?.selectedOptions || []
+      document.querySelectorAll("[data-admin-context-dish]:checked")
     ).map((option) => option.value);
     preferences.time_context = document.getElementById("admin-time-context")?.value || "Any";
     preferences.ranking_method =
@@ -428,8 +513,8 @@ async function refreshCustomerRecommendations() {
       : `<div class="info-card slim"><strong>No recommendations yet</strong><span>Select preferences or add dishes to cart.</span></div>`;
     renderRecommendationStats(result.stats);
     applyRecommendationBadges();
-    setupCartButtons();
-    setupDetailButtons();
+  setupCartButtons();
+  setupDetailButtons();
     window.dispatchEvent(new Event("resize"));
   } catch {
     row.innerHTML = `<div class="info-card slim"><strong>Recommendation refresh failed</strong><span>Please try again.</span></div>`;
@@ -448,7 +533,7 @@ function renderRecommendationCard(recommendation) {
         <strong>${escapeHtml(dish.price)}</strong>
         <div class="card-actions">
           <button class="add-button" data-add-cart="${escapeHtml(dish.dish_id)}" type="button">Add</button>
-          <button class="ghost-action" data-view-dish="${escapeHtml(dish.dish_id)}" type="button">Details</button>
+          <button class="ghost-action" data-view-dish="${escapeHtml(dish.dish_id)}" type="button">Why this?</button>
         </div>
       </div>
     </article>
@@ -523,9 +608,13 @@ function showDishDetail(dishId) {
         ${
           recommendation
             ? `<div class="reason-box">
-                <strong>Recommendation reason</strong>
+                <strong>Why recommended?</strong>
                 <p>${escapeHtml(recommendation.explanation)}</p>
-                <p>Content ${recommendation.content_score.toFixed(2)} · Co-order ${recommendation.co_order_score.toFixed(2)} · Popularity ${recommendation.popularity_score.toFixed(2)} · Time ${recommendation.business_rule_score.toFixed(2)} · Hybrid ${recommendation.hybrid_score.toFixed(2)}</p>
+                <details>
+                  <summary>Technical score breakdown</summary>
+                  <p>Content ${recommendation.content_score.toFixed(2)} · Co-order ${recommendation.co_order_score.toFixed(2)} · Popularity ${recommendation.popularity_score.toFixed(2)} · Time ${recommendation.business_rule_score.toFixed(2)} · Hybrid ${recommendation.hybrid_score.toFixed(2)}</p>
+                  <p>Support ${recommendation.association_support.toFixed(2)} · Confidence ${recommendation.association_confidence.toFixed(2)} · Lift ${recommendation.association_lift.toFixed(2)}</p>
+                </details>
               </div>`
             : ""
         }
@@ -629,18 +718,27 @@ function setupCheckout() {
       status.textContent = "Add at least one dish before checkout.";
       return;
     }
+    const identity = readCustomerIdentity();
+    if (!identity.session_id) {
+      status.textContent = "Your customer session expired. Please register again.";
+      return;
+    }
+    const note = document.getElementById("customer-note")?.value.trim() || "";
 
     button.disabled = true;
-    status.textContent = "Placing prototype order...";
+    status.textContent = "Placing order...";
 
     try {
       const response = await fetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dish_ids: dishIds }),
+        body: JSON.stringify({ dish_ids: dishIds, note }),
       });
-      const result = await response.json();
-      status.textContent = result.message;
+      const result = await response.json().catch(() => ({
+        ok: false,
+        message: "Checkout failed because the server returned an unreadable response.",
+      }));
+      status.textContent = result.message || "Checkout failed. Please try again.";
 
       if (result.ok) {
         if (result.order_id) {
@@ -648,9 +746,13 @@ function setupCheckout() {
         }
         writeCart({});
         renderCartPage();
+        window.setTimeout(() => {
+          window.location.href = "/profile";
+        }, 700);
       }
-    } catch {
-      status.textContent = "Checkout failed. Please try again.";
+    } catch (error) {
+      console.error("Checkout request failed", error);
+      status.textContent = "We could not reach the order server. Please try again.";
     } finally {
       button.disabled = false;
     }
@@ -658,19 +760,22 @@ function setupCheckout() {
 }
 
 function setupSmartMenuAssistant() {
-  const prompt = document.getElementById("assistant-prompt");
+  const prompt = document.getElementById("search-input");
   const button = document.getElementById("assistant-run");
   const understood = document.getElementById("assistant-understood");
   const upsells = document.getElementById("assistant-upsells");
   const row = document.getElementById("recommended-row");
   if (!prompt || !button || !understood || !row) {
+    // The Home search bar is now a dish locator only. When the optional
+    // assistant button is not rendered, typing should only show search
+    // suggestions and must not update recommendations or the static Menu grid.
     return;
   }
 
   const runAssistant = async () => {
     const text = prompt.value.trim();
     if (!text) {
-      understood.textContent = "Type a preference first, for example: spicy chicken but no beef.";
+      understood.textContent = "Type a dish, ingredient, or preference first, for example: spicy chicken but no beef.";
       return;
     }
 
@@ -700,8 +805,8 @@ function setupSmartMenuAssistant() {
       }
       renderRecommendationStats(result.stats);
       applyRecommendationBadges();
-      setupCartButtons();
-      setupDetailButtons();
+    setupCartButtons();
+    setupDetailButtons();
       window.dispatchEvent(new Event("resize"));
     } catch {
       understood.textContent = "Assistant request failed. Please try again.";
@@ -721,10 +826,12 @@ function setupSmartMenuAssistant() {
 
 function setupAdminTools() {
   setupAdminOrderStatus();
+  setupAdminOrderPolling();
   setupDishManagement();
   setupCsvTools();
   setupAdminRecommendationTester();
   setupAdminInsights();
+  setupSimulationTester();
 }
 
 function setupAdminOrderStatus() {
@@ -751,30 +858,187 @@ function setupAdminOrderStatus() {
   });
 }
 
+function setupAdminOrderPolling() {
+  const body = document.getElementById("admin-live-orders-body");
+  const statusMessage = document.getElementById("admin-order-status");
+  if (!body || body.dataset.pollingBound === "true") return;
+  body.dataset.pollingBound = "true";
+  let lastVersion = null;
+  const load = async () => {
+    const response = await fetch("/api/admin/orders");
+    const result = await response.json();
+    if (!result.ok || !result.data) {
+      if (statusMessage) statusMessage.textContent = result.message || "Unable to refresh orders.";
+      return;
+    }
+    if (lastVersion === result.data.version) return;
+    const hadVersion = lastVersion !== null;
+    lastVersion = result.data.version;
+    const active = (result.data.orders || []).filter((order) => !["Completed", "Cancelled"].includes(String(order.status)));
+    body.innerHTML = active.length
+      ? active.map(renderAdminOrderRow).join("")
+      : `<tr><td colspan="11">No active live customer orders yet.</td></tr>`;
+    setupAdminOrderStatus();
+    if (hadVersion && statusMessage) statusMessage.textContent = `Order list updated: ${result.data.updated_at}`;
+  };
+  load();
+  window.setInterval(() => {
+    if (!document.hidden) load();
+  }, 4000);
+}
+
+function renderAdminOrderRow(order) {
+  const statuses = ["Pending", "Preparing", "Ready", "Completed", "Cancelled"];
+  return `
+    <tr class="admin-live-order-row">
+      <td data-label="Order ID">${escapeHtml(order.order_id)}</td>
+      <td data-label="Session">${escapeHtml(order.session_user_id)}</td>
+      <td data-label="Customer">${escapeHtml(order.customer_name || "-")}</td>
+      <td data-label="Phone">${escapeHtml(order.customer_phone || "-")}</td>
+      <td data-label="Table">${escapeHtml(order.table_number || "-")}</td>
+      <td data-label="Dish IDs">${escapeHtml((order.ordered_dishes || []).join(", "))}</td>
+      <td data-label="Dish Names">${escapeHtml((order.dish_names || []).join(", "))}</td>
+      <td data-label="Note">${escapeHtml(order.note || "-")}</td>
+      <td data-label="Time">${escapeHtml(order.timestamp || "-")}</td>
+      <td data-label="Total">${escapeHtml(order.total_price || "-")}</td>
+      <td data-label="Status"><select data-order-status="${escapeHtml(order.order_id)}">${statuses.map((status) => `<option value="${status}" ${status === order.status ? "selected" : ""}>${status}</option>`).join("")}</select></td>
+    </tr>
+  `;
+}
+
 function setupDishManagement() {
   const form = document.getElementById("dish-form");
   const status = document.getElementById("dish-management-status");
+  const modal = document.getElementById("dish-form-modal");
+  const title = document.getElementById("dish-form-title");
+  const search = document.getElementById("admin-dish-search");
+  const availability = document.getElementById("admin-availability-filter");
+  const tableBody = document.getElementById("admin-dish-table-body");
+  const emptyState = document.getElementById("admin-dish-empty");
+  if (!form || !modal || !tableBody) return;
 
-  form?.addEventListener("submit", async (event) => {
+  const setStatus = (message, isError = false) => {
+    if (!status) return;
+    status.textContent = message || "";
+    status.classList.toggle("error", isError);
+  };
+
+  const openForm = (mode, dish = null) => {
+    form.reset();
+    form.dataset.mode = mode;
+    if (title) title.textContent = mode === "edit" ? "Edit Dish" : "Add Dish";
+    if (form.elements.dish_id) {
+      // Dish IDs connect menu rows with historical order logs. Edit mode keeps
+      // the ID visible but read-only so staff can change dish details without
+      // accidentally breaking existing co-order evidence.
+      form.elements.dish_id.readOnly = mode === "edit";
+    }
+    const submitButton = form.querySelector('button[type="submit"]');
+    if (submitButton) {
+      submitButton.textContent = mode === "edit" ? "Save Changes" : "Add Dish";
+    }
+    form.elements.available.checked = true;
+    if (dish) {
+      form.elements.dish_id.value = dish.dish_id || "";
+      form.elements.name.value = dish.name || "";
+      form.elements.price.value = dish.price_amount || "";
+      form.elements.category.value = dish.category || "";
+      form.elements.ingredients.value = (dish.ingredients || []).join(", ");
+      form.elements.tags.value = (dish.tags || []).join(", ");
+      form.elements.image_path.value = dish.image_path || "";
+      form.elements.available.checked = dish.available !== false;
+    }
+    modal.hidden = false;
+  };
+
+  document.getElementById("open-dish-form")?.addEventListener("click", () => openForm("add"));
+  document.getElementById("cancel-dish-form")?.addEventListener("click", () => {
+    modal.hidden = true;
+  });
+
+  const filterRows = () => {
+    const term = (search?.value || "").trim().toLowerCase();
+    const mode = availability?.value || "all";
+    let visible = 0;
+    document.querySelectorAll("[data-admin-dish-row]").forEach((row) => {
+      const haystack = [
+        row.dataset.adminDishRow,
+        row.dataset.dishName,
+        row.dataset.dishCategory,
+        row.dataset.dishIngredients,
+        row.dataset.dishTags,
+      ].join(" ").toLowerCase();
+      const availableText = row.dataset.dishAvailable === "true" ? "available" : "unavailable";
+      row.hidden = (term && !haystack.includes(term)) || (mode !== "all" && mode !== availableText);
+      if (!row.hidden) visible += 1;
+    });
+    if (emptyState) emptyState.hidden = visible !== 0;
+  };
+  search?.addEventListener("input", filterRows);
+  availability?.addEventListener("change", filterRows);
+
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const formData = new FormData(form);
     const payload = Object.fromEntries(formData.entries());
-    const response = await fetch("/api/admin/dishes", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const result = await response.json();
-    if (status) {
-      status.textContent = result.message;
-    }
-    if (result.ok) {
-      window.setTimeout(() => window.location.reload(), 600);
+    payload.available = formData.has("available");
+    const isEdit = form.dataset.mode === "edit";
+    const dishId = String(payload.dish_id || "").trim();
+    const endpoint = isEdit
+      ? `/api/admin/dishes/${encodeURIComponent(dishId)}`
+      : "/api/admin/dishes";
+    const submitButton = form.querySelector('button[type="submit"]');
+    submitButton.disabled = true;
+    try {
+      const response = await fetch(endpoint, {
+        method: isEdit ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      setStatus(result.message, !result.ok);
+      if (result.ok) {
+        modal.hidden = true;
+        // The server is the source of truth for image lookup and display
+        // pricing. Reloading after a successful mutation keeps the row markup
+        // consistent while all interaction bindings remain delegated.
+        window.setTimeout(() => window.location.reload(), 450);
+      }
+    } catch {
+      setStatus("Dish request failed. Please try again.", true);
+    } finally {
+      submitButton.disabled = false;
     }
   });
 
-  document.querySelectorAll("[data-toggle-dish]").forEach((button) => {
-    button.addEventListener("click", async () => {
+  // Event delegation keeps actions working even when rows are replaced after
+  // a future in-place refresh or import.
+  tableBody.addEventListener("click", async (event) => {
+    const button = event.target.closest("button");
+    if (!button) return;
+
+    if (button.matches("[data-edit-dish]")) {
+      setStatus("Loading dish...");
+      try {
+        const response = await fetch(
+          `/api/admin/dishes/${encodeURIComponent(button.dataset.editDish)}`,
+          { cache: "no-store" }
+        );
+        const result = await response.json();
+        if (!result.ok || !result.data) {
+          setStatus(result.message || "Dish could not be loaded.", true);
+          return;
+        }
+        setStatus("");
+        openForm("edit", result.data);
+      } catch {
+        setStatus("Dish could not be loaded.", true);
+      }
+      return;
+    }
+
+    if (button.matches("[data-toggle-dish]")) {
+      button.disabled = true;
       const response = await fetch(
         `/api/admin/dishes/${encodeURIComponent(button.dataset.toggleDish)}/availability`,
         {
@@ -784,32 +1048,31 @@ function setupDishManagement() {
         }
       );
       const result = await response.json();
-      if (status) {
-        status.textContent = result.message;
-      }
+      setStatus(result.message, !result.ok);
       if (result.ok) {
         window.setTimeout(() => window.location.reload(), 500);
       }
-    });
-  });
+      button.disabled = false;
+      return;
+    }
 
-  document.querySelectorAll("[data-delete-dish]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      if (!window.confirm("Delete this dish from the in-memory menu?")) {
+    if (button.matches("[data-delete-dish]")) {
+      if (!window.confirm("Permanently remove this dish from the in-memory menu? Dishes referenced by historical orders cannot be deleted.")) {
         return;
       }
+      button.disabled = true;
       const response = await fetch(
         `/api/admin/dishes/${encodeURIComponent(button.dataset.deleteDish)}/delete`,
         { method: "POST" }
       );
       const result = await response.json();
-      if (status) {
-        status.textContent = result.message;
-      }
+      setStatus(result.message, !result.ok);
       if (result.ok) {
-        window.setTimeout(() => window.location.reload(), 500);
+        button.closest("[data-admin-dish-row]")?.remove();
+        filterRows();
       }
-    });
+      button.disabled = false;
+    }
   });
 }
 
@@ -967,82 +1230,510 @@ function splitCsvPreviewRow(row) {
 }
 
 async function setupCustomerOrderStatus() {
-  const target = document.getElementById("latest-order-status");
+  const target = document.getElementById("orders-list");
   if (!target) {
     return;
   }
 
-  const orderId = localStorage.getItem(LAST_ORDER_KEY);
-  if (!orderId) {
-    return;
-  }
-
-  try {
-    const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}`);
-    const result = await response.json();
-    if (!result.ok || !result.order) {
-      target.innerHTML = `<strong>${escapeHtml(orderId)}</strong><span>${escapeHtml(result.message)}</span>`;
+  let lastVersion = null;
+  let timer = null;
+  const indicator = document.getElementById("order-sync-status");
+  const loadOrders = async () => {
+    let result = null;
+    try {
+      const response = await fetch("/api/customer/orders", { cache: "no-store" });
+      result = await response.json();
+    } catch (error) {
+      console.error("Customer order polling failed", error);
+      if (indicator) indicator.textContent = "Reconnecting to order status...";
       return;
     }
 
-    const order = result.order;
-    target.innerHTML = `
-      <strong>${escapeHtml(order.order_id)} · ${escapeHtml(order.status)}</strong>
-      <span>${escapeHtml((order.dish_names || []).join(", "))}</span>
-      <span>${escapeHtml(order.total_price)} · ${escapeHtml(order.timestamp)}</span>
-    `;
-  } catch {
-    target.innerHTML = `<strong>${escapeHtml(orderId)}</strong><span>Unable to fetch latest order status.</span>`;
+    if (!result.ok || !result.data) {
+      if (!lastVersion) {
+        target.innerHTML = `<div class="info-card"><strong>No current orders yet.</strong><span>${escapeHtml(result.message)}</span></div>`;
+      }
+      if (indicator) indicator.textContent = result.message || "Unable to refresh order status.";
+      return;
+    }
+    if (!(result.data.orders || []).length) {
+      target.innerHTML = `<div class="info-card"><strong>No current orders yet.</strong><span>Place an order from the cart to track it here.</span></div>`;
+      return;
+    }
+    if (lastVersion === result.data.version) return;
+    lastVersion = result.data.version;
+
+    target.innerHTML = result.data.orders.map(renderOrderCard).join("");
+    if (indicator) indicator.textContent = `Last updated: ${escapeHtml(result.data.updated_at)}`;
+    setupOrderFilters();
+  };
+
+  const schedule = () => {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(async () => {
+      if (!document.hidden) await loadOrders();
+      schedule();
+    }, document.hidden ? 12000 : 3000);
+  };
+
+  await loadOrders();
+  schedule();
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      loadOrders();
+    }
+    schedule();
+  });
+}
+
+function renderOrderCard(order) {
+  const status = String(order.status || "Pending");
+  const statusLower = status.toLowerCase();
+  const statusMessages = {
+    Pending: "Your order has been received.",
+    Preparing: "The kitchen is preparing your food.",
+    Ready: "Your food is ready.",
+    Completed: "Your order is completed.",
+    Cancelled: "Your order was cancelled. Please contact staff.",
+  };
+  return `
+    <article class="order-card" data-order-status-card="${escapeHtml(statusLower)}">
+      <div class="order-card-main">
+        <div>
+          <p class="eyebrow">${escapeHtml(order.order_id)}</p>
+          <h2>${escapeHtml(status)} · ${escapeHtml(order.total_price)}</h2>
+        </div>
+        <span class="status-badge ${escapeHtml(statusLower)}">${escapeHtml(status)}</span>
+      </div>
+      <div class="order-progress" aria-label="Order progress">${renderOrderSteps(status)}</div>
+      <p class="order-status-explanation">${escapeHtml(statusMessages[status] || "Order status updated.")}</p>
+      <p><strong>Customer:</strong> ${escapeHtml(order.customer_name || "-")}</p>
+      <p><strong>Dishes:</strong> ${escapeHtml((order.dish_names || []).join(", "))}</p>
+      <p><strong>Time:</strong> ${escapeHtml(order.timestamp || "-")}</p>
+      ${order.table_number ? `<p><strong>Table:</strong> ${escapeHtml(order.table_number)}</p>` : ""}
+    </article>
+  `;
+}
+
+function renderOrderSteps(status) {
+  const steps = ["Pending", "Preparing", "Ready", "Completed"];
+  if (status === "Cancelled") {
+    return `<span class="progress-step active cancelled">Cancelled</span>`;
   }
+  const activeIndex = Math.max(0, steps.indexOf(status));
+  return steps
+    .map((step, index) => `<span class="progress-step ${index <= activeIndex ? "active" : ""}">${escapeHtml(step)}</span>`)
+    .join("");
 }
 
 function setupAdminRecommendationTester() {
-  const button = document.getElementById("run-admin-recommendations");
-  const tableBody = document.getElementById("admin-recommendation-results");
-  const statsTarget = document.getElementById("admin-recommendation-stats");
-  if (!button || !tableBody) {
+  const tabs = Array.from(document.querySelectorAll("[data-experiment-tab]"));
+  if (!tabs.length) return;
+
+  const activateTab = (name, focus = false) => {
+    tabs.forEach((tab) => {
+      const active = tab.dataset.experimentTab === name;
+      tab.classList.toggle("active", active);
+      tab.setAttribute("aria-selected", String(active));
+      tab.tabIndex = active ? 0 : -1;
+      if (active && focus) tab.focus();
+    });
+    document.querySelectorAll("[data-experiment-panel]").forEach((panel) => {
+      panel.hidden = panel.dataset.experimentPanel !== name;
+    });
+  };
+
+  tabs.forEach((tab, index) => {
+    tab.addEventListener("click", () => activateTab(tab.dataset.experimentTab));
+    tab.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+      event.preventDefault();
+      const offset = event.key === "ArrowRight" ? 1 : -1;
+      const next = tabs[(index + offset + tabs.length) % tabs.length];
+      activateTab(next.dataset.experimentTab, true);
+    });
+  });
+  activateTab("ingredient");
+
+  const selectedValues = (kind) =>
+    Array.from(document.querySelectorAll(`[data-experiment-option="${kind}"]:checked`)).map(
+      (item) => item.value
+    );
+  const clearChecks = (prefix) => {
+    document.querySelectorAll(`[data-experiment-option^="${prefix}"]`).forEach((item) => {
+      item.checked = false;
+    });
+  };
+
+  document.querySelectorAll("[data-experiment-option-search]").forEach((search) => {
+    search.addEventListener("input", () => {
+      const kind = search.dataset.experimentOptionSearch;
+      const term = search.value.trim().toLowerCase();
+      document
+        .querySelectorAll(`[data-experiment-option-list="${kind}"] .ingredient-option`)
+        .forEach((option) => {
+          option.hidden = Boolean(term) && !String(option.dataset.optionLabel || "").includes(term);
+        });
+    });
+  });
+
+  // Liked and disliked selections are mutually exclusive in each experiment.
+  document.querySelectorAll("[data-experiment-option]").forEach((input) => {
+    input.addEventListener("change", () => {
+      if (!input.checked) return;
+      const [scope, side] = input.dataset.experimentOption.split("-");
+      const opposite = side === "liked" ? "disliked" : "liked";
+      document
+        .querySelector(
+          `[data-experiment-option="${scope}-${opposite}"][value="${CSS.escape(input.value)}"]`
+        )
+        ?.removeAttribute("checked");
+      const oppositeInput = document.querySelector(
+        `[data-experiment-option="${scope}-${opposite}"][value="${CSS.escape(input.value)}"]`
+      );
+      if (oppositeInput) oppositeInput.checked = false;
+    });
+  });
+
+  document.querySelectorAll("[data-ingredient-preset]").forEach((button) => {
+    button.addEventListener("click", () => {
+      clearChecks("ingredient-");
+      if (button.dataset.ingredientPreset === "all") {
+        document.querySelectorAll('[data-experiment-option="ingredient-liked"]').forEach((item) => {
+          item.checked = true;
+        });
+      }
+      if (button.dataset.ingredientPreset === "example") {
+        ["chicken", "rice"].forEach((value) => {
+          const input = document.querySelector(
+            `[data-experiment-option="ingredient-liked"][value="${CSS.escape(value)}"]`
+          );
+          if (input) input.checked = true;
+        });
+        ["beef", "anchovies"].forEach((value) => {
+          const input = document.querySelector(
+            `[data-experiment-option="ingredient-disliked"][value="${CSS.escape(value)}"]`
+          );
+          if (input) input.checked = true;
+        });
+      }
+    });
+  });
+
+  const historicalOrder = document.getElementById("method-historical-order");
+  const hiddenDish = document.getElementById("method-hidden-dish");
+  const populateHiddenTargets = () => {
+    if (!historicalOrder || !hiddenDish) return;
+    const selected = historicalOrder.selectedOptions[0];
+    const ids = String(selected?.dataset.dishIds || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    hiddenDish.innerHTML = ids.length
+      ? `<option value="">Select hidden target</option>${ids
+          .map((id) => {
+            const dish = (window.MENU_DISHES || []).find((item) => item.dish_id === id);
+            return `<option value="${escapeHtml(id)}">${escapeHtml(dish?.name || id)} (${escapeHtml(id)})</option>`;
+          })
+          .join("")}`
+      : `<option value="">Select an order first</option>`;
+    hiddenDish.disabled = !ids.length;
+  };
+  historicalOrder?.addEventListener("change", populateHiddenTargets);
+
+  const payloadFor = (type) => {
+    if (type === "ingredient") {
+      return {
+        experiment_type: type,
+        liked_ingredients: selectedValues("ingredient-liked"),
+        disliked_ingredients: selectedValues("ingredient-disliked"),
+        top_k: Number(document.getElementById("ingredient-top-k")?.value || 5),
+      };
+    }
+    if (type === "coorder") {
+      const anchor = document.getElementById("coorder-anchor-dish")?.value || "";
+      const candidate = document.getElementById("coorder-candidate-dish")?.value || "";
+      if (!anchor) throw new Error("Select an anchor dish.");
+      if (!candidate) throw new Error("Select a candidate dish.");
+      if (anchor === candidate) throw new Error("Anchor and candidate must be different.");
+      return {
+        experiment_type: type,
+        anchor_dish_id: anchor,
+        candidate_dish_id: candidate,
+        additional_coorders: Number(document.getElementById("coorder-additional")?.value || 0),
+        top_k: Number(document.getElementById("coorder-top-k")?.value || 5),
+      };
+    }
+    const orderId = historicalOrder?.value || "";
+    const target = hiddenDish?.value || "";
+    if (!orderId) throw new Error("Select a historical order.");
+    if (!target) throw new Error("Select a hidden target dish.");
+    return {
+      experiment_type: type,
+      historical_order_id: orderId,
+      hidden_dish_id: target,
+      liked_ingredients: selectedValues("method-liked"),
+      disliked_ingredients: selectedValues("method-disliked"),
+      top_k: Number(document.getElementById("method-top-k")?.value || 5),
+    };
+  };
+
+  document.querySelectorAll("[data-run-experiment]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const type = button.dataset.runExperiment;
+      const target = document.getElementById(`experiment-result-${type}`);
+      if (!target) return;
+      let payload;
+      try {
+        payload = payloadFor(type);
+      } catch (error) {
+        target.innerHTML = experimentMessage(error.message, true);
+        return;
+      }
+      button.disabled = true;
+      const original = button.textContent;
+      button.textContent = "Running...";
+      target.innerHTML = experimentMessage("Running controlled experiment...");
+      try {
+        const response = await fetch("/api/admin/experiment-lab", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json();
+        if (!result.ok || !result.data) {
+          target.innerHTML = experimentMessage(
+            `The experiment request failed: ${result.message || "Unknown error."}`,
+            true
+          );
+          return;
+        }
+        target.innerHTML = renderExperimentResult(type, result.data);
+      } catch {
+        target.innerHTML = experimentMessage("The experiment request failed: unable to reach the server.", true);
+      } finally {
+        button.disabled = false;
+        button.textContent = original;
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-clear-experiment]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const target = document.getElementById(`experiment-result-${button.dataset.clearExperiment}`);
+      if (target) target.innerHTML = "";
+    });
+  });
+
+  document.querySelectorAll("[data-reset-experiment]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const type = button.dataset.resetExperiment;
+      if (type === "ingredient") {
+        clearChecks("ingredient-");
+        document.getElementById("ingredient-top-k").value = "5";
+      } else if (type === "coorder") {
+        document.getElementById("coorder-anchor-dish").value = "";
+        document.getElementById("coorder-candidate-dish").value = "";
+        document.getElementById("coorder-additional").value = "10";
+        document.getElementById("coorder-top-k").value = "5";
+      } else {
+        clearChecks("method-");
+        historicalOrder.value = "";
+        document.getElementById("method-top-k").value = "5";
+        populateHiddenTargets();
+      }
+      if (type === "ingredient" || type === "method") {
+        document
+          .querySelectorAll(`[data-experiment-option-search^="${type}-"]`)
+          .forEach((search) => {
+            search.value = "";
+            search.dispatchEvent(new Event("input"));
+          });
+      }
+      const target = document.getElementById(`experiment-result-${type}`);
+      if (target) target.innerHTML = "";
+    });
+  });
+}
+
+function experimentMessage(message, isError = false) {
+  return `<div class="info-card slim ${isError ? "error" : ""}"><strong>${escapeHtml(message)}</strong></div>`;
+}
+
+function renderExperimentResult(type, data) {
+  const rows = data.rows || [];
+  let table = "";
+  if (type === "ingredient") {
+    const dishes = new Map();
+    rows.forEach((row) => {
+      const item = dishes.get(row.dish_id) || { dish_id: row.dish_id, dish_name: row.dish_name };
+      if (String(row.method).startsWith("Before")) item.before = row;
+      else item.after = row;
+      dishes.set(row.dish_id, item);
+    });
+    const body = Array.from(dishes.values())
+      .map((item) => {
+        const before = item.before?.rank ?? "-";
+        const after = item.after?.rank ?? "-";
+        const change =
+          before === "-" ? "New in Top-K" :
+          after === "-" ? "Excluded" :
+          before > after ? `↑ ${before - after} position(s)` :
+          before < after ? `↓ ${after - before} position(s)` : "No change";
+        return `<tr><td>${escapeHtml(item.dish_name)} (${escapeHtml(item.dish_id)})</td><td>${before}</td><td>${after}</td><td>${item.after ? Number(item.after.ingredient_score).toFixed(2) : "-"}</td><td>${escapeHtml(change)}</td><td>${escapeHtml(item.after?.matched || item.after?.excluded || "Disliked ingredient")}</td></tr>`;
+      })
+      .join("");
+    table = experimentTable(
+      ["Dish", "Before rank", "After rank", "Ingredient score", "Change", "Matched / exclusion"],
+      body
+    );
+  } else if (type === "coorder") {
+    const before = rows[0] || {};
+    const after = rows[1] || {};
+    const beforeMetrics = parseCoorderMetrics(before.matched);
+    const afterMetrics = parseCoorderMetrics(after.matched);
+    const metrics = [
+      ["Pair count", beforeMetrics.pairCount, afterMetrics.pairCount],
+      ["Co-order score", Number(before.co_order_score || 0), Number(after.co_order_score || 0)],
+      ["Support", beforeMetrics.support, afterMetrics.support],
+      ["Confidence", beforeMetrics.confidence, afterMetrics.confidence],
+      ["Lift", beforeMetrics.lift, afterMetrics.lift],
+      ["Candidate rank", before.rank ?? "-", after.rank ?? "-"],
+    ];
+    const body = metrics
+      .map(([label, first, second]) => {
+        const numeric = typeof first === "number" && typeof second === "number";
+        const change = numeric ? second - first : "-";
+        const format = (value) =>
+          typeof value === "number" ? value.toFixed(label === "Pair count" || label === "Candidate rank" ? 0 : 2) : value;
+        return `<tr><td>${escapeHtml(label)}</td><td>${format(first)}</td><td>${format(second)}</td><td>${format(change)}</td></tr>`;
+      })
+      .join("");
+    table = experimentTable(["Metric", "Before", "After", "Change"], body);
+  } else {
+    const methods = [...new Set(rows.map((row) => row.method))];
+    const methodTables = methods
+      .map((method) => {
+        const body = rows
+          .filter((row) => row.method === method)
+          .map((row) => `<tr class="${row.hidden_match ? "highlight-row" : ""}"><td>${row.rank ?? "-"}</td><td>${escapeHtml(row.dish_id)}</td><td>${escapeHtml(row.dish_name)}</td><td>${Number(row.final_score).toFixed(2)}</td><td>${row.hidden_match ? "Hidden target" : "-"}</td></tr>`)
+          .join("");
+        return `<h4>${escapeHtml(method)}</h4>${experimentTable(["Rank", "Dish ID", "Dish", "Score", "Target"], body)}`;
+      })
+      .join("");
+    const summaryRows = methods
+      .map((method) => {
+        const methodRows = rows.filter((row) => row.method === method);
+        const target = methodRows.find((row) => row.hidden_match);
+        const details = String(methodRows[0]?.matched || "");
+        const matchRate = details.match(/preference match rate:\s*([0-9.]+)/i)?.[1] || "-";
+        const violations = details.match(/violations:\s*(\d+)/i)?.[1] || "-";
+        return `<tr><td>${escapeHtml(method)}</td><td>${target ? "Yes" : "No"}</td><td>${target?.rank ?? "-"}</td><td>${escapeHtml(matchRate)}</td><td>${escapeHtml(violations)}</td></tr>`;
+      })
+      .join("");
+    table = `${methodTables}<h4>Method summary</h4>${experimentTable(
+      ["Method", "Hit@K", "Hidden rank", "Preference match rate", "Violations"],
+      summaryRows
+    )}`;
+  }
+  return `${table}<div class="reason-box"><strong>Conclusion</strong><p>${escapeHtml(data.conclusion || "-")}</p><p>Production data and weights were not changed.</p></div>`;
+}
+
+function parseCoorderMetrics(text) {
+  const value = String(text || "");
+  const number = (pattern) => Number(value.match(pattern)?.[1] || 0);
+  return {
+    pairCount: number(/Pair count:\s*(\d+)/i),
+    support: number(/support\s*([0-9.]+)/i),
+    confidence: number(/confidence\s*([0-9.]+)/i),
+    lift: number(/lift\s*([0-9.]+)/i),
+  };
+}
+
+function experimentTable(headers, body) {
+  return `<div class="table-wrap"><table><thead><tr>${headers
+    .map((header) => `<th>${escapeHtml(header)}</th>`)
+    .join("")}</tr></thead><tbody>${body || `<tr><td colspan="${headers.length}">No result rows.</td></tr>`}</tbody></table></div>`;
+}
+
+function setupSimulationTester() {
+  const runButton = document.getElementById("run-simulation");
+  const resetButton = document.getElementById("reset-simulation");
+  const target = document.getElementById("simulation-results");
+  const forcedA = document.getElementById("simulation-forced-a");
+  const forcedB = document.getElementById("simulation-forced-b");
+  if (!runButton || !target) {
     return;
   }
 
-  button.addEventListener("click", async () => {
-    tableBody.innerHTML = `<tr><td colspan="11">Running recommendation test...</td></tr>`;
-    const result = await requestRecommendations(collectPreferences("admin"));
-    const rows = (result.recommendations || []).slice(0, 12).map((item) => {
-      return `
-        <tr>
-          <td><strong>${escapeHtml(item.dish.name)}</strong><span>${escapeHtml(item.dish.dish_id)}</span></td>
-          <td>${escapeHtml(item.dish.category)}</td>
-          <td>${item.content_score.toFixed(2)}</td>
-          <td>${item.co_order_score.toFixed(2)}</td>
-          <td>${item.popularity_score.toFixed(2)}</td>
-          <td>${item.business_rule_score.toFixed(2)}</td>
-          <td>${item.hybrid_score.toFixed(2)}</td>
-          <td>${item.association_support.toFixed(2)}<span>${item.association_pair_count} pair(s)</span></td>
-          <td>${item.association_confidence.toFixed(2)}</td>
-          <td>${item.association_lift.toFixed(2)}<span>${escapeHtml(item.association_base_dish_id || "-")}</span></td>
-          <td>
-            ${escapeHtml(item.explanation)}
-            <br><span class="muted">Liked: ${escapeHtml(formatList(item.matched_liked_ingredients))}</span>
-            <br><span class="muted">Tags: ${escapeHtml(formatList(item.matched_preferred_tags))}</span>
-            <br><span class="muted">Co-order: ${escapeHtml(formatList(item.related_selected_dishes))}</span>
-          </td>
-        </tr>
-      `;
-    });
-    tableBody.innerHTML = rows.length
-      ? rows.join("")
-      : `<tr><td colspan="11">No recommendation evidence for this test input.</td></tr>`;
-    if (statsTarget && result.stats) {
-      statsTarget.innerHTML = `
-        <span>Eligible dishes: <strong>${result.stats.eligible_dishes ?? result.stats.filtered_dishes}</strong></span>
-        <span>Matched preferences: <strong>${result.stats.matched_preferences || 0}</strong></span>
-        <span>Excluded disliked: <strong>${result.stats.excluded_due_to_disliked}</strong></span>
-        <span>Skipped selected: <strong>${result.stats.skipped_selected_dishes}</strong></span>
-        <span>Recommended shown: <strong>${result.stats.recommended_shown || rows.length}</strong></span>
-        <span>Top-5 diversity: <strong>${result.stats.diversity_count_top_5}</strong></span>
-      `;
+  const forcedOptions = [`<option value="">No forced pair</option>`]
+    .concat(
+      (window.MENU_DISHES || []).map(
+        (dish) => `<option value="${escapeHtml(dish.dish_id)}">${escapeHtml(dish.name)} (${escapeHtml(dish.dish_id)})</option>`
+      )
+    )
+    .join("");
+  if (forcedA) forcedA.innerHTML = forcedOptions;
+  if (forcedB) forcedB.innerHTML = forcedOptions;
+
+  runButton.addEventListener("click", async () => {
+    target.innerHTML = `<div class="info-card slim"><strong>Running simulation...</strong><span>Generated orders are in memory only.</span></div>`;
+    const preferences = collectPreferences("admin");
+    const payload = {
+      ...preferences,
+      order_count: Number(document.getElementById("simulation-order-count")?.value || 20),
+      min_dishes: Number(document.getElementById("simulation-min-dishes")?.value || 2),
+      max_dishes: Number(document.getElementById("simulation-max-dishes")?.value || 4),
+      seed: Number(document.getElementById("simulation-seed")?.value || 42),
+      popularity_skew: document.getElementById("simulation-skew")?.value || "uniform",
+      forced_dish_a: forcedA?.value || null,
+      forced_dish_b: forcedB?.value || null,
+      pair_probability: Number(document.getElementById("simulation-pair-probability")?.value || 35),
+    };
+    try {
+      const response = await fetch("/api/admin/simulation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!result.ok) {
+        target.innerHTML = `<div class="info-card slim"><strong>Simulation failed</strong><span>${escapeHtml(result.message)}</span></div>`;
+        return;
+      }
+      renderSimulationResults(result.data, target);
+    } catch (error) {
+      console.error("Simulation failed", error);
+      target.innerHTML = `<div class="info-card slim"><strong>Simulation failed</strong><span>Please try again.</span></div>`;
     }
   });
+
+  resetButton?.addEventListener("click", () => {
+    target.innerHTML = `<div class="info-card slim"><strong>Simulation reset</strong><span>The tester is using the real historical order dataset only.</span></div>`;
+  });
+}
+
+function renderSimulationResults(data, target) {
+  const preview = (data.preview || [])
+    .map((order) => `<li><strong>${escapeHtml(order.order_id)}</strong>: ${escapeHtml((order.dish_names || order.dish_ids || []).join(", "))}</li>`)
+    .join("");
+  const pairs = (data.changed_pairs || [])
+    .map(
+      (pair) => `<tr><td>${escapeHtml(pair.label)}</td><td>${pair.before_count}</td><td>${pair.after_count}</td><td>${Number(pair.support_before).toFixed(2)}</td><td>${Number(pair.support_after).toFixed(2)}</td></tr>`
+    )
+    .join("");
+  const ranks = (data.rank_changes || [])
+    .map(
+      (item) => `<tr><td>${escapeHtml(item.dish_name)} (${escapeHtml(item.dish_id)})</td><td>${item.before_rank ?? "-"}</td><td>${item.after_rank ?? "-"}</td><td>${Number(item.before_score).toFixed(2)}</td><td>${Number(item.after_score).toFixed(2)}</td><td>${escapeHtml(item.explanation)}</td></tr>`
+    )
+    .join("");
+
+  target.innerHTML = `
+    <div class="info-card slim"><strong>${escapeHtml(data.note || "Simulation completed.")}</strong><span>${data.generated_order_count || 0} generated basket(s).</span></div>
+    <details open><summary>Generated order preview</summary><ul class="simulation-preview">${preview || "<li>No generated orders.</li>"}</ul></details>
+    <details open><summary>Top changed co-order pairs</summary><div class="table-wrap"><table><thead><tr><th>Pair</th><th>Before</th><th>After</th><th>Support before</th><th>Support after</th></tr></thead><tbody>${pairs || "<tr><td colspan='5'>No pair changes found.</td></tr>"}</tbody></table></div></details>
+    <details open><summary>Recommendation rank changes</summary><div class="table-wrap"><table><thead><tr><th>Dish</th><th>Before rank</th><th>After rank</th><th>Before score</th><th>After score</th><th>Explanation</th></tr></thead><tbody>${ranks || "<tr><td colspan='6'>No rank changes found.</td></tr>"}</tbody></table></div></details>
+  `;
 }
 
 function setupAdminInsights() {
@@ -1085,7 +1776,7 @@ function setupAdminInsights() {
 
 document.addEventListener("DOMContentLoaded", () => {
   updateCartCount();
-  setupMenuFiltering();
+  setupDishLocator();
   setupCarouselControls();
   setupOrderFilters();
   setupPreferencePanels();

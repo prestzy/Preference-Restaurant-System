@@ -1,6 +1,7 @@
 mod agent;
 mod data_loader;
 mod models;
+mod persistence;
 #[allow(dead_code)]
 mod preferences;
 mod recommender;
@@ -14,6 +15,8 @@ use anyhow::{Context, Result};
 use data_loader::{
     DISHES_PATH, ORDERS_PATH, generate_sample_data_if_missing, load_dishes, load_orders,
 };
+use persistence::order_details::{ORDER_DETAILS_PATH, load_order_details};
+use std::env;
 use tokio::net::TcpListener;
 use web::state::WebState;
 
@@ -30,16 +33,27 @@ async fn main() -> Result<()> {
 
     let dishes = load_dishes(DISHES_PATH).context("failed to load dishes.csv")?;
     let orders = load_orders(ORDERS_PATH).context("failed to load orders.csv")?;
-    let state = WebState::new(dishes, orders);
+    let order_details =
+        load_order_details(ORDER_DETAILS_PATH).context("failed to load order_details.csv")?;
+    let state = WebState::new_with_operational_data(dishes, orders, order_details);
     let app = web::routes::router(state);
 
-    let listener = TcpListener::bind("127.0.0.1:3000")
+    // Loopback remains the safe local default. Setting APP_HOST=0.0.0.0 makes
+    // the same server reachable from a phone on the local network.
+    let host = env::var("APP_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let port = env::var("APP_PORT").unwrap_or_else(|_| "3000".to_string());
+    let bind_address = format!("{host}:{port}");
+    let listener = TcpListener::bind(&bind_address)
         .await
-        .context("failed to bind web server to 127.0.0.1:3000")?;
+        .with_context(|| format!("failed to bind web server to {bind_address}"))?;
 
     println!("Preference-Driven Restaurant Ordering System");
-    println!("Customer menu: http://127.0.0.1:3000/");
-    println!("Admin page:    http://127.0.0.1:3000/admin");
+    println!("Listening on:  http://{bind_address}/");
+    println!("Customer menu: http://127.0.0.1:{port}/");
+    println!("Admin page:    http://127.0.0.1:{port}/admin");
+    if host == "0.0.0.0" {
+        println!("Phone access:  open http://<this-computer-LAN-IP>:{port}/");
+    }
 
     axum::serve(listener, app)
         .await

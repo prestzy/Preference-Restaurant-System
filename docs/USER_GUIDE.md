@@ -12,7 +12,17 @@ Open:
 http://127.0.0.1:3000/
 ```
 
-The app is bound to localhost for development. For phone testing from another device, the bind address would need to be changed later.
+The app uses localhost by default. For phone testing, start it with:
+
+```powershell
+$env:APP_HOST="0.0.0.0"
+cargo run
+```
+
+Then open `http://<computer-lan-ip>:3000/` from a phone on the same local
+network. Use `ipconfig` to find the computer's IPv4 address. Registration and
+admin login use normal relative form submissions and separate host-only
+session cookies, so the browser must keep using the same hostname/IP.
 
 ## Customer Menu
 

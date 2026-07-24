@@ -1,18 +1,17 @@
 use crate::web::state::WebState;
-use crate::web::templates;
 use axum::Json;
-use axum::extract::{Path, State};
-use axum::response::Html;
+use axum::extract::{Path, Query, State};
+use axum::http::HeaderMap;
+use axum::response::{IntoResponse, Redirect, Response};
+use serde::Deserialize;
 use serde::Serialize;
 
 /// Renders the customer orders page placeholder.
 ///
 /// Live order tracking can be expanded later without touching cart checkout or
 /// recommendation code.
-pub async fn orders_page(State(state): State<WebState>) -> Html<String> {
-    let view = state.menu_view();
-    let orders = state.customer_orders();
-    Html(templates::orders_page(&view, &orders))
+pub async fn orders_page() -> Response {
+    Redirect::to("/profile").into_response()
 }
 
 /// Returns one in-memory checkout order for customer-side status tracking.
@@ -36,6 +35,80 @@ pub async fn order_status(
             order: None,
         }),
     }
+}
+
+pub async fn my_orders(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Query(query): Query<MyOrdersQuery>,
+) -> Json<MyOrdersResponse> {
+    let phone = super::customer::current_customer_session(&state, &headers)
+        .map(|session| session.customer_phone)
+        .or(query.phone);
+    let Some(phone) = phone else {
+        return Json(MyOrdersResponse {
+            ok: false,
+            message: "Your customer session expired. Please register again.".to_string(),
+            orders: Vec::new(),
+        });
+    };
+    match state.customer_orders_by_phone(&phone) {
+        Ok(orders) => Json(MyOrdersResponse {
+            ok: true,
+            message: "Customer orders loaded.".to_string(),
+            orders,
+        }),
+        Err(message) => Json(MyOrdersResponse {
+            ok: false,
+            message,
+            orders: Vec::new(),
+        }),
+    }
+}
+
+pub async fn profile_orders(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+) -> Json<MyOrdersSyncResponse> {
+    let Some(session) = super::customer::current_customer_session(&state, &headers) else {
+        return Json(MyOrdersSyncResponse {
+            ok: false,
+            message: "Your customer session expired. Please register again.".to_string(),
+            data: None,
+        });
+    };
+    match state.customer_order_sync_by_phone(&session.customer_phone) {
+        Ok(data) => Json(MyOrdersSyncResponse {
+            ok: true,
+            message: "Customer orders loaded.".to_string(),
+            data: Some(data),
+        }),
+        Err(message) => Json(MyOrdersSyncResponse {
+            ok: false,
+            message,
+            data: None,
+        }),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MyOrdersQuery {
+    #[serde(default)]
+    pub phone: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MyOrdersResponse {
+    pub ok: bool,
+    pub message: String,
+    pub orders: Vec<crate::web::state::LiveOrder>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MyOrdersSyncResponse {
+    pub ok: bool,
+    pub message: String,
+    pub data: Option<crate::web::state::OrderSyncResponse>,
 }
 
 #[derive(Debug, Serialize)]

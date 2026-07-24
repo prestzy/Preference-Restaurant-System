@@ -1,0 +1,2 @@
+feedback_id,session_id,dish_id,recommendation_method,is_relevant,timestamp,liked_ingredients,disliked_ingredients,preferred_tags,rank
+F00001,S1784902846873576,D30,hybrid,true,2026-07-24 22:20,,,,

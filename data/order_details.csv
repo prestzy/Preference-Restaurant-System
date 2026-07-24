@@ -1,0 +1,5 @@
+web_order_id,historical_order_id,customer_name,customer_phone,table_number,note,dish_ids,total,status,created_at
+WEB001,O061,PrestonY,60173533996,A01,,"D13,D07,D28",RM 48,Completed,2026-07-24 21:28
+WEB002,O062,PrestonY,60173533996,A01,Add More Sambal,"D02,D03,D01",RM 36,Completed,2026-07-24 22:10
+WEB003,O063,PrestonY,60173533996,A01,,"D30,D01,D03",RM 38,Completed,2026-07-24 22:48
+WEB004,O064,PrestonY,60173533996,A01,,"D03,D06,D09",RM 42,Completed,2026-07-24 22:49

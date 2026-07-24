@@ -7,6 +7,8 @@
 pub mod admin;
 pub mod assistant;
 pub mod cart;
+pub mod customer;
 pub mod menu;
 pub mod orders;
 pub mod recommendations;
+pub mod search;
