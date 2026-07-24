@@ -107,7 +107,7 @@ Templates receive prepared view models. They do not load CSV files or run recomm
 
 Frontend assets:
 
-- `app.css`: orange/white mobile-first theme.
+- `app.css`: Catppuccin Latte tokens, responsive component styling, and Cart grid.
 - `app.js`: small browser controller for interaction.
 
 The frontend is intentionally simple. There is no heavy JavaScript framework.

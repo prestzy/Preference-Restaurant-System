@@ -333,6 +333,13 @@ impl WebState {
 
     /// Deterministically rebuilds explanatory events from durable order history.
     pub fn rebuild_learning_timeline(&self) -> Result<LearningTimelineResponse, String> {
+        // Holding the event lock through reconstruction and replacement keeps a
+        // newly completed order from appending between the file rewrite and
+        // in-memory replacement.
+        let mut stored_events = self
+            .learning_events
+            .write()
+            .expect("learning events lock poisoned");
         let events = rebuild_learning_timeline(
             &self
                 .historical_orders
@@ -344,15 +351,39 @@ impl WebState {
             rewrite_learning_events(&events, &self.learning_events_path.to_string_lossy())
                 .map_err(|error| format!("Could not rebuild the learning timeline: {error}"))?;
         }
-        *self
-            .learning_events
-            .write()
-            .expect("learning events lock poisoned") = events;
+        *stored_events = events;
+        drop(stored_events);
         *self
             .learning_timeline_warning
             .write()
             .expect("timeline warning lock poisoned") = None;
         Ok(self.learning_timeline())
+    }
+
+    /// Clears only explanatory learning events and leaves every order-based
+    /// recommendation data source untouched.
+    ///
+    /// The write lock spans the durable replacement and the in-memory clear so
+    /// a concurrently completed order cannot be lost between those two steps.
+    /// If persistence fails, the existing in-memory events remain available.
+    pub fn clear_learning_timeline(&self) -> Result<LearningTimelineClearResponse, String> {
+        let mut events = self
+            .learning_events
+            .write()
+            .expect("learning events lock poisoned");
+        let removed_event_count = events.len();
+        if !self.learning_events_path.as_os_str().is_empty() {
+            rewrite_learning_events(&[], &self.learning_events_path.to_string_lossy())
+                .map_err(|error| format!("Could not clear the learning timeline: {error}"))?;
+        }
+        events.clear();
+        *self
+            .learning_timeline_warning
+            .write()
+            .expect("timeline warning lock poisoned") = None;
+        Ok(LearningTimelineClearResponse {
+            removed_event_count,
+        })
     }
 
     /// Runs canonical customer menu search for the locator suggestion list.
@@ -2093,6 +2124,12 @@ pub struct LearningTimelineResponse {
     pub warning: Option<String>,
 }
 
+/// Result of deleting explanatory timeline records.
+#[derive(Debug, Clone, Serialize)]
+pub struct LearningTimelineClearResponse {
+    pub removed_event_count: usize,
+}
+
 /// JSON response from `/api/recommendations`.
 #[derive(Debug, Clone, Serialize)]
 pub struct RecommendationApiResponse {
@@ -2108,8 +2145,8 @@ pub struct RecommendationApiResponse {
 /// JSON response from `/api/search`.
 ///
 /// It carries the same ranked result set used for both the suggestion dropdown
-/// and the visible customer Menu cards. That avoids UI drift where suggestions
-/// understand concepts but the Menu section still shows every dish.
+/// and locator behavior. Search results never replace, hide, or reorder the
+/// server-rendered static customer Menu cards.
 #[derive(Debug, Clone, Serialize)]
 pub struct MenuSearchResponse {
     pub query: String,
@@ -4057,6 +4094,59 @@ mod tests {
         assert!(!comparison.rank_changes.is_empty());
         assert_eq!(state.combined_orders().len(), history_before.len());
         assert_eq!(state.learning_timeline().event_count, 0);
+    }
+
+    #[test]
+    fn clearing_learning_timeline_preserves_orders_and_recommendation_evidence() {
+        let dishes = vec![
+            dish("D01", "Rice Bowl", "main", &["rice"], &["local"]),
+            dish("D02", "Chicken Satay", "side", &["chicken"], &["grilled"]),
+        ];
+        let orders = vec![Order {
+            order_id: "O001".to_string(),
+            session_user_id: "U01".to_string(),
+            ordered_dishes: vec!["D01".to_string(), "D02".to_string()],
+            timestamp: "2026-01-01 12:00".to_string(),
+        }];
+        let path = temp_order_csv_path("timeline_clear").with_extension("jsonl");
+        let mut state = WebState::new(dishes.clone(), orders.clone());
+        state.learning_events_path = Arc::new(path.clone());
+        let event = build_learning_event(&dishes, &[], &orders[0]);
+        rewrite_learning_events(std::slice::from_ref(&event), &path.to_string_lossy()).unwrap();
+        state
+            .learning_events
+            .write()
+            .expect("timeline lock")
+            .push(event);
+        let before = state.recommend(RecommendationRequest {
+            selected_dish_ids: vec!["D01".to_string()],
+            ..RecommendationRequest::default()
+        });
+
+        let result = state.clear_learning_timeline().unwrap();
+        let after = state.recommend(RecommendationRequest {
+            selected_dish_ids: vec!["D01".to_string()],
+            ..RecommendationRequest::default()
+        });
+
+        assert_eq!(result.removed_event_count, 1);
+        assert_eq!(state.learning_timeline().event_count, 0);
+        assert_eq!(state.combined_orders().len(), 1);
+        assert_eq!(state.combined_orders()[0].order_id, orders[0].order_id);
+        assert_eq!(
+            before.evidence_profile.total_order_count,
+            after.evidence_profile.total_order_count
+        );
+        assert_eq!(
+            before.evidence_profile.strongest_context_pair_count,
+            after.evidence_profile.strongest_context_pair_count
+        );
+        assert!(
+            crate::persistence::learning_events::load_learning_events(&path.to_string_lossy())
+                .unwrap()
+                .is_empty()
+        );
+        let _ = fs::remove_file(path);
     }
 
     #[test]

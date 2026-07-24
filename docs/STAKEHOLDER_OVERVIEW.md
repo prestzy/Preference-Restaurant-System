@@ -52,7 +52,7 @@ Recommendation cards and the admin tester show the reason, score breakdown, and 
 
 ## Customer Experience
 
-The customer-facing layout keeps the orange/white mobile-first design:
+The customer-facing layout uses a warm Catppuccin Latte mobile-first design:
 
 1. Search bar.
 2. Category chips.

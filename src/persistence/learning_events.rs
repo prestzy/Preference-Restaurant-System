@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const LEARNING_EVENTS_PATH: &str = "data/recommendation_learning_events.jsonl";
 
@@ -54,10 +55,54 @@ pub fn rewrite_learning_events(events: &[RecommendationLearningEvent], path: &st
         serde_json::to_writer(&mut payload, event)?;
         payload.push(b'\n');
     }
-    if let Some(parent) = Path::new(path).parent() {
+    let target = Path::new(path);
+    if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, payload).with_context(|| format!("failed to rewrite learning timeline {path}"))
+    replace_file_safely(target, &payload)
+        .with_context(|| format!("failed to rewrite learning timeline {path}"))
+}
+
+/// Writes a complete replacement before moving it over the active timeline.
+///
+/// Windows cannot rename a new file over an existing destination. The short
+/// backup step therefore keeps the previous valid file recoverable if the
+/// final move fails. This helper is deliberately private to timeline
+/// persistence and never receives the historical order CSV path.
+fn replace_file_safely(target: &Path, payload: &[u8]) -> Result<()> {
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let file_name = target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("recommendation_learning_events.jsonl");
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    let temporary = parent.join(format!(".{file_name}.{suffix}.tmp"));
+    let backup = parent.join(format!(".{file_name}.{suffix}.bak"));
+
+    let mut file = fs::File::create(&temporary)?;
+    file.write_all(payload)?;
+    file.sync_all()?;
+
+    let had_target = target.exists();
+    if had_target {
+        fs::rename(target, &backup)?;
+    }
+
+    if let Err(error) = fs::rename(&temporary, target) {
+        if had_target {
+            let _ = fs::rename(&backup, target);
+        }
+        let _ = fs::remove_file(&temporary);
+        return Err(error.into());
+    }
+
+    if had_target {
+        let _ = fs::remove_file(backup);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -94,6 +139,26 @@ mod tests {
         assert!(append_learning_event(&event("O001"), &path_text).unwrap());
         assert!(!append_learning_event(&event("O001"), &path_text).unwrap());
         assert_eq!(load_learning_events(&path_text).unwrap().len(), 1);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn rewrite_can_safely_clear_an_existing_timeline() {
+        let path: std::path::PathBuf = std::env::temp_dir().join(format!(
+            "fyp-learning-clear-{}-{}.jsonl",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path_text = path.to_string_lossy();
+        rewrite_learning_events(&[event("O001"), event("O002")], &path_text).unwrap();
+        assert_eq!(load_learning_events(&path_text).unwrap().len(), 2);
+
+        rewrite_learning_events(&[], &path_text).unwrap();
+        assert!(load_learning_events(&path_text).unwrap().is_empty());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "");
         let _ = fs::remove_file(path);
     }
 }

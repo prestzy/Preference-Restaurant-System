@@ -79,7 +79,8 @@ pub fn router(state: WebState) -> Router {
         )
         .route(
             "/api/admin/recommendations/learning-timeline",
-            get(handlers::advanced_recommendations::learning_timeline),
+            get(handlers::advanced_recommendations::learning_timeline)
+                .delete(handlers::advanced_recommendations::clear_learning_timeline),
         )
         .route(
             "/api/admin/recommendations/learning-timeline/rebuild",

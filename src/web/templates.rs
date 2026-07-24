@@ -27,13 +27,25 @@ pub fn customer_menu_page(view: &MenuView, session: &CustomerSession) -> String 
             )
         })
         .collect::<String>();
+    let meal_context_options = view
+        .dishes
+        .iter()
+        .map(|dish| {
+            format!(
+                r#"<label class="category-check"><input type="checkbox" value="{}" data-meal-context> {} ({})</label>"#,
+                escape_attr(&dish.dish_id),
+                escape_html(&dish.name),
+                escape_html(&dish.dish_id)
+            )
+        })
+        .collect::<String>();
     let content = format!(
         r#"
         <section class="search-panel unified-search-panel" aria-label="Search menu and preferences">
             <p class="eyebrow">Preston's Restaurant</p>
             <h1>Welcome, {customer_name}</h1>
             <label class="search-box">
-                <span class="search-icon">⌕</span>
+                <span class="search-icon">{search_icon}</span>
                 <input id="search-input" type="search" aria-label="Find a dish" placeholder="Find dishes, ingredients, tags, or taste..." autocomplete="off">
             </label>
             <div class="search-suggestions" id="search-suggestions" hidden></div>
@@ -50,15 +62,9 @@ pub fn customer_menu_page(view: &MenuView, session: &CustomerSession) -> String 
                     <p>Based on your preferences and ordering patterns</p>
                 </div>
                 <div class="carousel-controls" aria-label="Recommended dish carousel controls">
-                    <button class="carousel-arrow" type="button" data-carousel-scroll="recommended-row" data-direction="-1" aria-label="Scroll recommendations left">‹</button>
-                    <button class="carousel-arrow" type="button" data-carousel-scroll="recommended-row" data-direction="1" aria-label="Scroll recommendations right">›</button>
+                    <button class="carousel-arrow" type="button" data-carousel-scroll="recommended-row" data-direction="-1" aria-label="Scroll recommendations left">{chevron_left}</button>
+                    <button class="carousel-arrow" type="button" data-carousel-scroll="recommended-row" data-direction="1" aria-label="Scroll recommendations right">{chevron_right}</button>
                 </div>
-            </div>
-            <div class="diversity-selector" aria-label="Recommendation variety">
-                <span>Variety:</span>
-                <button type="button" data-diversity-mode="familiar">Familiar</button>
-                <button class="active" type="button" data-diversity-mode="balanced">Balanced</button>
-                <button type="button" data-diversity-mode="discover">Discover</button>
             </div>
             <div class="recommended-row" id="recommended-row">
                 {recommended_cards}
@@ -68,21 +74,46 @@ pub fn customer_menu_page(view: &MenuView, session: &CustomerSession) -> String 
 
         <section class="meal-set-builder" aria-labelledby="meal-set-title">
             <div class="section-heading">
-                <div><h2 id="meal-set-title">Build a Meal Set</h2><p>Create a relevant set within one exact budget.</p></div>
+                <div><h2 id="meal-set-title">Build a Meal Set</h2><p>Create a balanced selection that fits your budget and preferences.</p></div>
             </div>
-            <div class="meal-set-controls">
-                <label>Budget (RM)<input id="meal-budget" type="number" min="1" step="1" value="60" inputmode="numeric"></label>
-                <label>People<input id="meal-party-size" type="number" min="1" max="12" value="2" inputmode="numeric"></label>
-                <label>Dishes (optional)<input id="meal-target-count" type="number" min="1" max="8" placeholder="Auto" inputmode="numeric"></label>
-                <label>Results<select id="meal-set-count"><option>1</option><option selected>3</option><option>5</option></select></label>
+            <div class="meal-step">
+                <div class="meal-step-heading"><span>1</span><div><h3>Your table</h3><p>Set the spending limit and serving size.</p></div></div>
+                <div class="meal-set-controls">
+                    <label>Budget (RM)<input id="meal-budget" data-meal-control type="number" min="1" step="1" value="60" inputmode="numeric"></label>
+                    <label>People<input id="meal-party-size" data-meal-control type="number" min="1" max="12" value="2" inputmode="numeric"></label>
+                    <label>Dishes (optional)<input id="meal-target-count" data-meal-control type="number" min="1" max="8" placeholder="Auto" inputmode="numeric"></label>
+                    <label>Results<select id="meal-set-count" data-meal-control><option>1</option><option selected>3</option><option>5</option></select></label>
+                </div>
             </div>
-            <details class="meal-category-options">
-                <summary>Required categories</summary>
-                <div class="category-check-row">{required_category_options}</div>
-            </details>
-            <button class="primary-action" id="build-meal-set" type="button">Build Meal Set</button>
+            <div class="meal-step">
+                <div class="meal-step-heading"><span>2</span><div><h3>Preferences</h3><p>Likes, dislikes and tags come from Personalise Recommendations above.</p></div></div>
+                <details class="meal-category-options">
+                    <summary>Required categories</summary>
+                    <div class="category-check-row">{required_category_options}</div>
+                </details>
+                <details class="meal-category-options">
+                    <summary>Current dishes used as recommendation context</summary>
+                    <p class="muted">These choices guide co-ordering only. Clearing them never removes items from your Cart.</p>
+                    <div class="category-check-row meal-context-options">{meal_context_options}</div>
+                </details>
+            </div>
+            <div class="meal-step">
+                <div class="meal-step-heading"><span>3</span><div><h3>Style</h3><p id="diversity-description">Balanced combines familiar matches with some variety.</p></div></div>
+                <div class="diversity-selector" aria-label="Recommendation variety">
+                    <button type="button" data-meal-control data-diversity-mode="familiar" aria-pressed="false">Familiar</button>
+                    <button class="active" type="button" data-meal-control data-diversity-mode="balanced" aria-pressed="true">Balanced</button>
+                    <button type="button" data-meal-control data-diversity-mode="discover" aria-pressed="false">Discover</button>
+                </div>
+            </div>
+            <div class="meal-action-row">
+                <button class="primary-action" id="build-meal-set" data-meal-control type="button">Generate Meal Set</button>
+                <button class="ghost-action" id="clear-meal-choices" data-meal-control type="button">Clear Choices</button>
+                <button class="ghost-action" id="clear-meal-result" data-meal-control type="button">{clear_icon}Clear Result</button>
+            </div>
             <p class="status-message" id="meal-set-status" aria-live="polite"></p>
-            <div class="meal-set-results" id="meal-set-results"></div>
+            <div class="meal-set-results" id="meal-set-results" aria-live="polite">
+                <div class="empty-state"><strong>No meal set has been generated yet.</strong><span>Choose your table settings and generate a meal set when ready.</span></div>
+            </div>
         </section>
 
         <section class="menu-section" aria-labelledby="menu-title">
@@ -102,7 +133,12 @@ pub fn customer_menu_page(view: &MenuView, session: &CustomerSession) -> String 
         customer_name = escape_html(&session.customer_name),
         dish_count = view.dishes.len(),
         dish_modal = dish_detail_modal(),
-        required_category_options = required_category_options
+        required_category_options = required_category_options,
+        meal_context_options = meal_context_options,
+        search_icon = icon_svg("search"),
+        chevron_left = icon_svg("chevron-left"),
+        chevron_right = icon_svg("chevron-right"),
+        clear_icon = icon_svg("x")
     );
 
     page_shell(
@@ -123,7 +159,7 @@ pub fn cart_page(view: &MenuView, session: &CustomerSession) -> String {
         r#"
         <section class="plain-page">
             <p class="eyebrow">Preston's Restaurant</p>
-            <h1>Cart</h1>
+            <h1 class="page-title-with-icon">{cart_icon} Cart</h1>
             <p>Review selected dishes. Checkout creates a live order for staff and your Profile page.</p>
             <div class="admin-card customer-summary-card">
                 <strong>Ordering for: {name}</strong>
@@ -136,8 +172,12 @@ pub fn cart_page(view: &MenuView, session: &CustomerSession) -> String {
                 <input id="customer-note" placeholder="Optional, e.g. less spicy or no cutlery">
             </label>
             <div class="cart-summary">
-                <strong id="cart-page-total">RM 0</strong>
-                <button class="primary-action" id="checkout-button" type="button">Place Order</button>
+                <div class="cart-summary__metrics">
+                    <div class="cart-summary__row"><span>Unique dishes</span><strong class="cart-summary__value" id="cart-unique-count">0</strong></div>
+                    <div class="cart-summary__row"><span>Total portions</span><strong class="cart-summary__value" id="cart-portions-count">0</strong></div>
+                    <div class="cart-summary__row total-row"><span>Subtotal</span><strong class="cart-summary__value" id="cart-page-total">RM0.00</strong></div>
+                </div>
+                <button class="primary-action" id="checkout-button" type="button">{checkout_icon} Place Order</button>
             </div>
             <p class="muted">FYP prototype: no payment is processed.</p>
             <p class="status-message" id="checkout-status"></p>
@@ -145,7 +185,9 @@ pub fn cart_page(view: &MenuView, session: &CustomerSession) -> String {
     "#,
         name = escape_html(&session.customer_name),
         table = escape_html(&session.table_number),
-        phone = escape_html(&session.masked_phone())
+        phone = escape_html(&session.masked_phone()),
+        cart_icon = icon_svg("shopping-cart"),
+        checkout_icon = icon_svg("circle-check")
     );
 
     page_shell(
@@ -190,28 +232,30 @@ pub fn customer_start_page(
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Preston's Restaurant mobile ordering menu">
     <title>Start Order | Preston's Restaurant</title>
-    <link rel="stylesheet" href="/static/app.css?v=20260724-brand-responsive">
+    <link rel="stylesheet" href="/static/app.css?v=20260725-catppuccin-cart">
     <script src="/static/auth.js?v=20260724" defer></script>
 </head>
 <body>
     <main class="app-shell start-shell">
         <section class="admin-card start-card">
             <p class="eyebrow">Preston's Restaurant</p>
-            <h1>Start Your Dining Session</h1>
+            <h1 class="page-title-with-icon">{user_icon} Start Your Dining Session</h1>
             <p class="muted">Enter basic details once. Checkout and order tracking will use this temporary session.</p>
             {message}
             <form class="admin-form" method="post" action="/start" data-auth-form>
                 <label class="field-label">Customer name<input name="customer_name" value="{name}" placeholder="Customer name" autocomplete="name" required></label>
                 <label class="field-label">Phone number<input name="customer_phone" value="{phone}" placeholder="e.g. 0123456789" autocomplete="tel" inputmode="tel" required></label>
                 <label class="field-label">Table number<input name="table_number" value="{table}" placeholder="e.g. T05" required></label>
-                <button class="primary-action" type="submit" data-submitting-label="Continuing...">Enter Menu</button>
+                <button class="primary-action" type="submit" data-submitting-label="Continuing...">Enter Menu {enter_icon}</button>
             </form>
             <p class="privacy-note">Your details are used only for this dining session, order fulfilment, and order-status communication.</p>
             <a class="ghost-link" href="/admin/login">Staff Admin Login</a>
         </section>
     </main>
 </body>
-</html>"#
+</html>"#,
+        user_icon = icon_svg("user"),
+        enter_icon = icon_svg("chevron-right")
     )
 }
 
@@ -477,25 +521,28 @@ pub fn admin_login_page(username: Option<&str>, message: Option<&str>) -> String
     <link rel="icon" href="data:,">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Login</title>
-    <link rel="stylesheet" href="/static/app.css?v=20260724-brand-responsive">
+    <link rel="stylesheet" href="/static/app.css?v=20260725-catppuccin-cart">
     <script src="/static/auth.js?v=20260724" defer></script>
 </head>
 <body>
     <main class="app-shell admin-login-shell">
         <section class="admin-card login-card">
             <p class="eyebrow">Staff Access</p>
-            <h1>Admin Login</h1>
+            <h1 class="page-title-with-icon">{lock_icon} Admin Login</h1>
             <p class="muted">Prototype staff area for orders, dishes, recommendation testing, and menu insights.</p>
             {message}
             <form class="admin-form" method="post" action="/admin/login" data-auth-form>
                 <input name="username" value="{username}" placeholder="Username" autocomplete="username" required>
                 <input name="password" type="password" placeholder="Password" autocomplete="current-password" required>
-                <button class="primary-action" type="submit" data-submitting-label="Logging in...">Log In</button>
+                <button class="primary-action" type="submit" data-submitting-label="Logging in...">{lock_icon} Log In</button>
             </form>
+            <a class="ghost-link" href="/">{home_icon} Go to Customer Menu</a>
         </section>
     </main>
 </body>
-</html>"#
+</html>"#,
+        lock_icon = icon_svg("lock-keyhole"),
+        home_icon = icon_svg("home")
     )
 }
 
@@ -521,7 +568,7 @@ fn page_shell(
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Preston's Restaurant menu, recommendations, cart, and order tracking">
     <title>{} | Preston's Restaurant</title>
-    <link rel="stylesheet" href="/static/app.css?v=20260724-brand-responsive">
+    <link rel="stylesheet" href="/static/app.css?v=20260725-catppuccin-cart">
     <script>
         window.MENU_DISHES = {};
         window.RECOMMENDATIONS = {};
@@ -529,7 +576,7 @@ fn page_shell(
         window.SEARCH_VOCABULARY = {};
         window.CUSTOMER_SESSION = {};
     </script>
-    <script src="/static/app.js?v=20260724-brand-responsive" defer></script>
+    <script src="/static/app.js?v=20260725-catppuccin-cart" defer></script>
 </head>
 <body>
     <main class="app-shell">
@@ -564,14 +611,14 @@ fn admin_page_shell(
     <link rel="icon" href="data:,">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{}</title>
-    <link rel="stylesheet" href="/static/app.css?v=20260724-brand-responsive">
+    <link rel="stylesheet" href="/static/app.css?v=20260725-catppuccin-cart">
     <script>
         window.MENU_DISHES = {};
         window.RECOMMENDATIONS = {};
         window.PREFERENCE_OPTIONS = {};
         window.SEARCH_VOCABULARY = {};
     </script>
-    <script src="/static/app.js?v=20260724-brand-responsive" defer></script>
+    <script src="/static/app.js?v=20260725-catppuccin-cart" defer></script>
 </head>
 <body class="admin-body">
     <main class="app-shell admin-shell">
@@ -624,23 +671,25 @@ fn preference_panel(options: &PreferenceOptions, scope: &str) -> String {
 
 fn admin_section_nav(active: &str) -> String {
     let links = [
-        ("dashboard", "Dashboard", "/admin"),
-        ("orders", "Orders", "/admin/orders"),
-        ("dishes", "Dishes", "/admin/dishes"),
+        ("dashboard", "Dashboard", "/admin", "layout-dashboard"),
+        ("orders", "Orders", "/admin/orders", "clipboard-list"),
+        ("dishes", "Dishes", "/admin/dishes", "utensils"),
         (
             "recommendations",
             "Recommendation Tester",
             "/admin/recommendations",
+            "flask-conical",
         ),
-        ("logout", "Logout", "/admin/logout"),
+        ("logout", "Logout", "/admin/logout", "log-out"),
     ];
     let items = links
         .iter()
-        .map(|(id, label, href)| {
+        .map(|(id, label, href, icon)| {
             format!(
-                r#"<a class="admin-nav-link{}" href="{}">{}</a>"#,
+                r#"<a class="admin-nav-link{}" href="{}">{}{}</a>"#,
                 if *id == active { " active" } else { "" },
                 escape_attr(href),
+                icon_svg(icon),
                 escape_html(label)
             )
         })
@@ -690,8 +739,8 @@ fn recommended_card(recommendation: &RecommendationView) -> String {
                 <span class="reason">{reason}</span>
                 <strong>{price}</strong>
                 <div class="card-actions">
-                    <button class="add-button" data-add-cart="{dish_id}" type="button">Add</button>
-                    <button class="ghost-action" data-view-dish="{dish_id}" type="button">Why this?</button>
+                    <button class="add-button" data-add-cart="{dish_id}" type="button">{add_icon} Add</button>
+                    <button class="ghost-action" data-view-dish="{dish_id}" type="button">{info_icon} Why this?</button>
                 </div>
             </div>
         </article>
@@ -704,7 +753,9 @@ fn recommended_card(recommendation: &RecommendationView) -> String {
         confidence_label = confidence_label(recommendation),
         confidence_percent = (recommendation.evidence.overall_confidence * 100.0).round() as u8,
         reason = escape_html(&short_recommendation_reason(recommendation)),
-        price = escape_html(&dish.price)
+        price = escape_html(&dish.price),
+        add_icon = icon_svg("plus"),
+        info_icon = icon_svg("circle-info")
     )
 }
 
@@ -792,9 +843,9 @@ fn menu_card(dish: &DishView) -> String {
                 <p class="ingredients">{ingredients}</p>
                 <div class="dish-footer">
                     <strong>{price}</strong>
-                    <button class="add-button" data-add-cart="{dish_id}" type="button">Add</button>
+                    <button class="add-button" data-add-cart="{dish_id}" type="button">{add_icon} Add</button>
                 </div>
-                <button class="text-action" data-view-dish="{dish_id}" type="button">View details</button>
+                <button class="text-action button-with-icon" data-view-dish="{dish_id}" type="button">{view_icon} View details</button>
             </div>
         </article>
         "#,
@@ -811,7 +862,9 @@ fn menu_card(dish: &DishView) -> String {
         },
         tags = tags,
         ingredients = escape_html(&ingredients),
-        price = escape_html(&dish.price)
+        price = escape_html(&dish.price),
+        add_icon = icon_svg("plus"),
+        view_icon = icon_svg("eye")
     )
 }
 
@@ -823,21 +876,25 @@ fn image_block(dish: &DishView, extra_class: &str) -> String {
             escape_attr(&dish.name)
         ),
         None => format!(
-            r#"<div class="dish-art placeholder {extra_class}" aria-label="No image for {}">🍽</div>"#,
-            escape_attr(&dish.name)
+            r#"<div class="dish-art placeholder {extra_class}" aria-label="No image for {}">{}</div>"#,
+            escape_attr(&dish.name),
+            icon_svg("utensils")
         ),
     }
 }
 
-fn dish_detail_modal() -> &'static str {
-    r#"
+fn dish_detail_modal() -> String {
+    format!(
+        r#"
     <dialog class="dish-modal" id="dish-detail-modal">
         <div class="modal-content">
-            <button class="modal-close" type="button" data-close-dish-modal>×</button>
+            <button class="modal-close icon-button" type="button" data-close-dish-modal aria-label="Close dish details">{}</button>
             <div id="dish-detail-content"></div>
         </div>
     </dialog>
-    "#
+    "#,
+        icon_svg("x")
+    )
 }
 
 fn admin_dashboard(admin: &AdminView) -> String {
@@ -1075,9 +1132,9 @@ fn dish_management_panel(dishes: &[DishView]) -> String {
                     <td data-label="Ingredients">{ingredients}</td>
                     <td data-label="Status">{availability}</td>
                     <td data-label="Actions">
-                        <button class="ghost-action" data-edit-dish="{dish_id}" type="button">Edit</button>
-                        <button class="ghost-action" data-toggle-dish="{dish_id}" data-available="{next_available}" type="button">{toggle_label}</button>
-                        <button class="danger-action" data-delete-dish="{dish_id}" type="button">Delete</button>
+                        <button class="ghost-action" data-edit-dish="{dish_id}" type="button">{edit_icon} Edit</button>
+                        <button class="ghost-action" data-toggle-dish="{dish_id}" data-available="{next_available}" type="button">{availability_icon} {toggle_label}</button>
+                        <button class="danger-action" data-delete-dish="{dish_id}" type="button">{delete_icon} Delete</button>
                     </td>
                 </tr>
                 "#,
@@ -1096,6 +1153,9 @@ fn dish_management_panel(dishes: &[DishView]) -> String {
                 available_attr = if dish.available { "true" } else { "false" },
                 dish_id = escape_attr(&dish.dish_id),
                 next_available = if dish.available { "false" } else { "true" },
+                edit_icon = icon_svg("pencil"),
+                availability_icon = icon_svg("circle-check"),
+                delete_icon = icon_svg("trash-2"),
                 toggle_label = if dish.available {
                     "Mark unavailable"
                 } else {
@@ -1116,7 +1176,7 @@ fn dish_management_panel(dishes: &[DishView]) -> String {
                     <option value="available">Available</option>
                     <option value="unavailable">Unavailable</option>
                 </select>
-                <button class="primary-action" id="open-dish-form" type="button">+ Add Dish</button>
+                <button class="primary-action" id="open-dish-form" type="button">{add_icon} Add Dish</button>
             </div>
             <div class="modal-backdrop" id="dish-form-modal" hidden>
             <form class="admin-form dish-modal-card" id="dish-form">
@@ -1141,7 +1201,8 @@ fn dish_management_panel(dishes: &[DishView]) -> String {
             </div>
             <p class="muted" id="admin-dish-empty" hidden>No matching dishes</p>
         </section>
-        "#
+        "#,
+        add_icon = icon_svg("plus")
     )
 }
 
@@ -1169,7 +1230,47 @@ fn recommendation_tester(admin: &AdminView) -> String {
 
     format!(
         r#"
-        <section class="admin-card adaptive-inspector">
+        <section class="tester-overview" id="recommendation-tester-overview" data-tester-overview>
+            <div class="tester-overview-grid">
+                <article class="tool-overview-card"><span>Production</span><h2>Production Recommendation</h2><p>Inspect the live adaptive recommender, confidence, diversity and meal sets.</p><button class="primary-action" type="button" data-open-tester-category="production">Open Production</button></article>
+                <article class="tool-overview-card"><span>Research</span><h2>Controlled Experiments</h2><p>Run Ingredient Impact, Co-Order Impact and Method Comparison for FYP evaluation.</p><button class="primary-action" type="button" data-open-tester-category="experiments">Open Experiments</button></article>
+                <article class="tool-overview-card"><span>Reasoning</span><h2>Explainability</h2><p>Compare baseline and counterfactual recommendation results without production writes.</p><button class="primary-action" type="button" data-open-tester-category="explainability">Open Explainability</button></article>
+                <article class="tool-overview-card"><span>Evidence</span><h2>Learning History</h2><p>Review how completed orders changed popularity and co-order evidence.</p><button class="primary-action" type="button" data-open-tester-category="learning">Open Learning History</button></article>
+            </div>
+        </section>
+
+        <div class="tester-shell" data-tester-shell hidden>
+            <aside class="tool-category-nav" aria-label="Recommendation Tester categories">
+                <button type="button" data-tester-home>Overview</button>
+                <button type="button" data-tester-category="production" data-default-tool="adaptive">Production</button>
+                <button type="button" data-tester-category="experiments" data-default-tool="ingredient-impact">Experiments</button>
+                <button type="button" data-tester-category="explainability" data-default-tool="counterfactual">Explainability</button>
+                <button type="button" data-tester-category="learning" data-default-tool="timeline">Learning History</button>
+            </aside>
+            <div class="tester-workspace">
+                <label class="tester-mobile-category">Tool category
+                    <select id="tester-category-select">
+                        <option value="production">Production</option>
+                        <option value="experiments">Experiments</option>
+                        <option value="explainability">Explainability</option>
+                        <option value="learning">Learning History</option>
+                    </select>
+                </label>
+                <div class="tool-tabs" aria-label="Tools in selected category">
+                    <button type="button" data-tester-tool="adaptive" data-tool-category="production" data-tool-target="production-adaptive">Adaptive Scoring</button>
+                    <button type="button" data-tester-tool="confidence" data-tool-category="production" data-tool-target="production-adaptive">Confidence Meter</button>
+                    <button type="button" data-tester-tool="diversity" data-tool-category="production" data-tool-target="production-adaptive">Diversity</button>
+                    <button type="button" data-tester-tool="meal-sets" data-tool-category="production" data-tool-target="production-meal-sets">Meal Sets</button>
+                    <button type="button" data-tester-tool="ingredient-impact" data-tool-category="experiments" data-tool-target="controlled-experiments" data-experiment-shortcut="ingredient">Ingredient Impact</button>
+                    <button type="button" data-tester-tool="co-order-impact" data-tool-category="experiments" data-tool-target="controlled-experiments" data-experiment-shortcut="coorder">Co-Order Impact</button>
+                    <button type="button" data-tester-tool="method-comparison" data-tool-category="experiments" data-tool-target="controlled-experiments" data-experiment-shortcut="method">Method Comparison</button>
+                    <button type="button" data-tester-tool="counterfactual" data-tool-category="explainability" data-tool-target="explainability-counterfactual">What Would Change?</button>
+                    <button type="button" data-tester-tool="evidence" data-tool-category="explainability" data-tool-target="explainability-counterfactual">Evidence Breakdown</button>
+                    <button type="button" data-tester-tool="simulation" data-tool-category="explainability" data-tool-target="explainability-simulation">Co-Order Simulation</button>
+                    <button type="button" data-tester-tool="timeline" data-tool-category="learning" data-tool-target="learning-timeline">Timeline</button>
+                </div>
+
+        <section id="tool-production-adaptive" class="admin-card adaptive-inspector tool-workspace-panel" data-tool-panel="production-adaptive" hidden>
             <div class="section-heading">
                 <div><h2>Adaptive Scoring Inspector</h2><p>Inspect the data-aware adaptive weights used by the production customer recommender.</p></div>
                 <span class="method-label">Data-aware adaptive weights</span>
@@ -1191,13 +1292,38 @@ fn recommendation_tester(admin: &AdminView) -> String {
                 <label class="field-label compact-control">Time context<select id="adaptive-time"><option>Any</option><option>Breakfast</option><option>Lunch</option><option>Dinner</option><option>Snack</option></select></label>
             </div>
             <div class="form-actions">
-                <button class="primary-action" id="run-adaptive-inspector" type="button">Inspect Adaptive Scoring</button>
-                <button class="ghost-action" id="reset-adaptive-inspector" type="button">Reset</button>
+                <button class="primary-action" id="run-adaptive-inspector" type="button">{run_icon}Inspect Adaptive Scoring</button>
+                <button class="ghost-action" id="reset-adaptive-inspector" type="button">{reset_icon}Reset</button>
             </div>
             <div id="adaptive-inspector-results" class="experiment-result" aria-live="polite"></div>
         </section>
 
-        <section class="admin-card counterfactual-explorer">
+        <section id="tool-production-meal-sets" class="admin-card tool-workspace-panel" data-tool-panel="production-meal-sets" hidden>
+            <div class="section-heading">
+                <div><h2>Budget Meal Set Tester</h2><p>Run the same bounded meal-set service used by the customer application.</p></div>
+                <span class="method-label">Production pipeline</span>
+            </div>
+            <details class="experiment-guide"><summary>How to use this tool</summary><p>Enter a budget and party size, optionally select preferences and context dishes, then generate candidate sets. This request does not write orders or preferences.</p></details>
+            <div class="admin-form compact-form">
+                <label class="field-label">Budget (RM)<input id="admin-meal-budget" type="number" min="1" value="60"></label>
+                <label class="field-label">Party size<input id="admin-meal-party" type="number" min="1" max="12" value="2"></label>
+                <label class="field-label">Target dishes<input id="admin-meal-target" type="number" min="1" max="8" placeholder="Auto"></label>
+                <label class="field-label">Diversity<select id="admin-meal-diversity"><option>familiar</option><option selected>balanced</option><option>discover</option></select></label>
+                <label class="field-label">Liked ingredients<select id="admin-meal-liked" multiple size="5">{adaptive_ingredient_options}</select></label>
+                <label class="field-label">Disliked ingredients<select id="admin-meal-disliked" multiple size="5">{adaptive_ingredient_options}</select></label>
+                <label class="field-label">Preferred tags<select id="admin-meal-tags" multiple size="5">{adaptive_tag_options}</select></label>
+                <label class="field-label">Context dishes<select id="admin-meal-context" multiple size="5">{adaptive_dish_options}</select></label>
+            </div>
+            <div class="form-actions">
+                <button class="primary-action" id="run-admin-meal-set" type="button">{run_icon}Generate Meal Set</button>
+                <button class="ghost-action" id="reset-admin-meal-set" type="button">{reset_icon}Reset Inputs</button>
+                <button class="ghost-action" id="clear-admin-meal-result" type="button">{clear_icon}Clear Result</button>
+            </div>
+            <p class="status-message" id="admin-meal-status"></p>
+            <div id="admin-meal-results" class="experiment-result" aria-live="polite"></div>
+        </section>
+
+        <section id="tool-explainability-counterfactual" class="admin-card counterfactual-explorer tool-workspace-panel" data-tool-panel="explainability-counterfactual" hidden>
             <div class="section-heading">
                 <div><h2>What Would Change?</h2><p>Compare the exact production pipeline with one temporary alternative scenario.</p></div>
                 <span class="method-label">No production writes</span>
@@ -1232,22 +1358,51 @@ fn recommendation_tester(admin: &AdminView) -> String {
                 <label class="field-label">Top-K<select id="cf-top-k"><option>3</option><option selected>5</option><option>10</option></select></label>
             </div>
             <div class="form-actions">
-                <button class="primary-action" id="run-counterfactual" type="button">Compare Scenarios</button>
+                <button class="primary-action" id="run-counterfactual" type="button">{run_icon}Compare Scenarios</button>
                 <button class="ghost-action" id="export-counterfactual" type="button" disabled>Export Comparison CSV</button>
             </div>
             <div id="counterfactual-results" class="experiment-result" aria-live="polite"></div>
         </section>
 
-        <section class="admin-card learning-timeline-panel">
+        <section id="tool-explainability-simulation" class="admin-card simulation-panel tool-workspace-panel" data-tool-panel="explainability-simulation" hidden>
+            <div class="section-heading"><div><h2>Temporary Co-Order Simulation</h2><p>Compare ranking changes against generated in-memory baskets.</p></div><span class="method-label">No production writes</span></div>
+            <details class="experiment-guide"><summary>How to use this tool</summary><p>Choose deterministic simulation settings and an optional forced pair. The generated baskets are never appended to orders.csv.</p></details>
+            <div class="admin-form compact-form">
+                <label class="field-label">Order count<input id="simulation-order-count" type="number" min="1" max="200" value="20"></label>
+                <label class="field-label">Minimum dishes<input id="simulation-min-dishes" type="number" min="1" max="8" value="2"></label>
+                <label class="field-label">Maximum dishes<input id="simulation-max-dishes" type="number" min="1" max="8" value="4"></label>
+                <label class="field-label">Seed<input id="simulation-seed" type="number" value="42"></label>
+                <label class="field-label">Popularity skew<select id="simulation-skew"><option value="uniform">Uniform</option><option value="moderate">Moderate</option><option value="strong">Strong</option></select></label>
+                <label class="field-label">Forced pair A<select id="simulation-forced-a"></select></label>
+                <label class="field-label">Forced pair B<select id="simulation-forced-b"></select></label>
+                <label class="field-label">Pair probability (%)<input id="simulation-pair-probability" type="number" min="0" max="100" value="35"></label>
+            </div>
+            <div class="form-actions"><button class="primary-action" id="run-simulation" type="button">{run_icon}Run Simulation</button><button class="ghost-action" id="reset-simulation" type="button">{clear_icon}Clear Result</button></div>
+            <div class="simulation-results" id="simulation-results" aria-live="polite"></div>
+        </section>
+
+        <section id="tool-learning-timeline" class="admin-card learning-timeline-panel tool-workspace-panel" data-tool-panel="learning-timeline" hidden>
             <div class="section-heading">
                 <div><h2>How the Recommender Learned</h2><p>Factual evidence changes produced by real completed historical orders.</p></div>
-                <button class="ghost-action" id="rebuild-learning-timeline" type="button">Rebuild Timeline</button>
+            </div>
+            <details class="experiment-guide"><summary>How to use this tool</summary><p>Filter explanatory events for presentation. Reset Filters is non-destructive. Clear Timeline removes only JSONL explanation records; Rebuild reconstructs them from historical orders.</p></details>
+            <div class="timeline-filter-grid">
+                <label class="field-label">Search<input id="timeline-search" type="search" placeholder="Order, dish, or summary"></label>
+                <label class="field-label">Date<input id="timeline-date" type="date"></label>
+                <label class="field-label">Dish<select id="timeline-dish"><option value="">All dishes</option>{select_options}</select></label>
+                <label class="field-label">Sort<select id="timeline-sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
+                <label class="field-label">Visible events<select id="timeline-limit"><option>10</option><option selected>25</option><option>50</option><option value="all">All</option></select></label>
+            </div>
+            <div class="form-actions">
+                <button class="ghost-action" id="reset-timeline-filters" type="button">{reset_icon}Reset Filters</button>
+                <button class="danger-action" id="clear-learning-timeline" type="button">{delete_icon}Clear Timeline</button>
+                <button class="primary-action" id="rebuild-learning-timeline" type="button">{rebuild_icon}Rebuild Timeline</button>
             </div>
             <p class="status-message" id="learning-timeline-status"></p>
             <div id="learning-timeline" class="learning-timeline" aria-live="polite"></div>
         </section>
 
-        <section class="admin-card experiment-lab">
+        <section id="tool-controlled-experiments" class="admin-card experiment-lab tool-workspace-panel" data-tool-panel="controlled-experiments" hidden>
             <div class="section-heading"><div><h2>Recommendation Experiment Lab</h2><p>Run controlled tests without changing production orders or recommendation weights.</p></div><span class="method-label">Controlled fixed weights for comparison</span></div>
             <details class="experiment-guide">
                 <summary>How to Use the Experiment Lab</summary>
@@ -1279,9 +1434,9 @@ fn recommendation_tester(admin: &AdminView) -> String {
                 </div>
                 <label class="field-label compact-control">Top-K {top_k_ingredient}</label>
                 <div class="form-actions">
-                    <button class="primary-action" type="button" data-run-experiment="ingredient">Run Ingredient Experiment</button>
-                    <button class="ghost-action" type="button" data-reset-experiment="ingredient">Reset</button>
-                    <button class="ghost-action" type="button" data-clear-experiment="ingredient">Clear Result</button>
+                    <button class="primary-action" type="button" data-run-experiment="ingredient">{run_icon}Run Ingredient Experiment</button>
+                    <button class="ghost-action" type="button" data-reset-experiment="ingredient">{reset_icon}Reset</button>
+                    <button class="ghost-action" type="button" data-clear-experiment="ingredient">{clear_icon}Clear Result</button>
                 </div>
                 <div class="experiment-result" id="experiment-result-ingredient" aria-live="polite"></div>
             </section>
@@ -1297,9 +1452,9 @@ fn recommendation_tester(admin: &AdminView) -> String {
                     <label class="field-label">Top-K {top_k_coorder}</label>
                 </div>
                 <div class="form-actions">
-                    <button class="primary-action" type="button" data-run-experiment="coorder">Run Co-Order Experiment</button>
-                    <button class="ghost-action" type="button" data-reset-experiment="coorder">Reset</button>
-                    <button class="ghost-action" type="button" data-clear-experiment="coorder">Clear Result</button>
+                    <button class="primary-action" type="button" data-run-experiment="coorder">{run_icon}Run Co-Order Experiment</button>
+                    <button class="ghost-action" type="button" data-reset-experiment="coorder">{reset_icon}Reset</button>
+                    <button class="ghost-action" type="button" data-clear-experiment="coorder">{clear_icon}Clear Result</button>
                 </div>
                 <div class="experiment-result" id="experiment-result-coorder" aria-live="polite"></div>
             </section>
@@ -1318,15 +1473,29 @@ fn recommendation_tester(admin: &AdminView) -> String {
                     <div><h4>Disliked ingredients</h4><input class="experiment-option-search" type="search" placeholder="Find a disliked ingredient" aria-label="Search method disliked ingredients" data-experiment-option-search="method-disliked"><div class="ingredient-option-list" data-experiment-option-list="method-disliked">{method_disliked_options}</div></div>
                 </div>
                 <div class="form-actions">
-                    <button class="primary-action" type="button" data-run-experiment="method">Run Method Comparison</button>
-                    <button class="ghost-action" type="button" data-reset-experiment="method">Reset</button>
-                    <button class="ghost-action" type="button" data-clear-experiment="method">Clear Result</button>
+                    <button class="primary-action" type="button" data-run-experiment="method">{run_icon}Run Method Comparison</button>
+                    <button class="ghost-action" type="button" data-reset-experiment="method">{reset_icon}Reset</button>
+                    <button class="ghost-action" type="button" data-clear-experiment="method">{clear_icon}Clear Result</button>
                 </div>
                 <div class="experiment-result" id="experiment-result-method" aria-live="polite"></div>
             </section>
 
             <div class="reason-box"><strong>Controlled testing only</strong><p>Production customer recommendations use adaptive weights. These experiments keep ingredient-only 1.0/0.0, co-order-only 0.0/1.0, and Hybrid 0.4/0.6 fixed. Simulations use cloned orders and never write to data/orders.csv.</p></div>
         </section>
+
+            </div>
+        </div>
+
+        <dialog class="confirmation-dialog" id="timeline-confirm-dialog" aria-labelledby="timeline-confirm-title">
+            <form method="dialog">
+                <h2 id="timeline-confirm-title">Confirm timeline action</h2>
+                <p id="timeline-confirm-message"></p>
+                <div class="form-actions">
+                    <button class="ghost-action" value="cancel" type="submit">Cancel</button>
+                    <button class="danger-action" id="confirm-timeline-action" value="confirm" type="button">Confirm</button>
+                </div>
+            </form>
+        </dialog>
         "#,
         adaptive_ingredient_options = adaptive_ingredient_options,
         adaptive_tag_options = adaptive_tag_options,
@@ -1336,6 +1505,11 @@ fn recommendation_tester(admin: &AdminView) -> String {
         top_k_ingredient = top_k_select("ingredient-top-k"),
         top_k_coorder = top_k_select("coorder-top-k"),
         top_k_method = top_k_select("method-top-k"),
+        run_icon = icon_svg("play"),
+        reset_icon = icon_svg("rotate-ccw"),
+        clear_icon = icon_svg("x"),
+        delete_icon = icon_svg("trash-2"),
+        rebuild_icon = icon_svg("refresh-cw"),
     )
 }
 
@@ -1485,12 +1659,78 @@ fn csv_data_tools_panel() -> String {
     .to_string()
 }
 
+/// Renders the shared inline Lucide icon subset.
+///
+/// Keeping the path data in one helper gives customer and admin templates the
+/// same 24px view box, rounded strokes, and `currentColor` theming without
+/// requiring an external icon CDN at runtime.
+fn icon_svg(name: &str) -> String {
+    let body = match name {
+        "home" => {
+            r#"<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><polyline points="9 22 9 12 15 12 15 22"/>"#
+        }
+        "search" => r#"<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>"#,
+        "user" => r#"<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/>"#,
+        "shopping-cart" => {
+            r#"<circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h7.72a2 2 0 0 0 2-1.61L20.05 7H5.12"/>"#
+        }
+        "lock-keyhole" => {
+            r#"<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1"/>"#
+        }
+        "chevron-left" => r#"<path d="m15 18-6-6 6-6"/>"#,
+        "chevron-right" => r#"<path d="m9 18 6-6-6-6"/>"#,
+        "plus" => r#"<path d="M5 12h14"/><path d="M12 5v14"/>"#,
+        "minus" => r#"<path d="M5 12h14"/>"#,
+        "x" => r#"<path d="M18 6 6 18"/><path d="m6 6 12 12"/>"#,
+        "eye" => {
+            r#"<path d="M2.06 12.35a1 1 0 0 1 0-.7 10.94 10.94 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.94 10.94 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/>"#
+        }
+        "utensils" => {
+            r#"<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2Z"/><path d="M18 22v-7"/>"#
+        }
+        "circle-check" => r#"<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>"#,
+        "circle-info" => {
+            r#"<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>"#
+        }
+        "layout-dashboard" => {
+            r#"<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>"#
+        }
+        "clipboard-list" => {
+            r#"<rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/>"#
+        }
+        "flask-conical" => {
+            r#"<path d="M10 2v7.31"/><path d="M14 9.3V1.99"/><path d="M8.5 2h7"/><path d="M14 9.3 20.5 20a1 1 0 0 1-.85 1.5H4.35A1 1 0 0 1 3.5 20L10 9.3"/><path d="M6.5 16h11"/>"#
+        }
+        "log-out" => {
+            r#"<path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>"#
+        }
+        "pencil" => {
+            r#"<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>"#
+        }
+        "trash-2" => {
+            r#"<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/>"#
+        }
+        "rotate-ccw" => r#"<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>"#,
+        "refresh-cw" => {
+            r#"<path d="M21 12a9 9 0 0 0-15-6.7L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15 6.7L21 16"/><path d="M16 16h5v5"/>"#
+        }
+        "play" => r#"<polygon points="6 3 20 12 6 21 6 3"/>"#,
+        "history" => {
+            r#"<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>"#
+        }
+        _ => r#"<circle cx="12" cy="12" r="9"/>"#,
+    };
+    format!(
+        r#"<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{body}</svg>"#
+    )
+}
+
 fn bottom_nav(active: &str) -> String {
     let items = [
-        ("home", "Home", "/", "home-icon"),
-        ("profile", "Profile", "/profile", "profile-icon"),
-        ("cart", "Cart", "/cart", "cart-icon"),
-        ("admin", "Admin Login", "/admin/login", "lock-icon"),
+        ("home", "Home", "/", "home"),
+        ("profile", "Profile", "/profile", "user"),
+        ("cart", "Cart", "/cart", "shopping-cart"),
+        ("admin", "Admin Login", "/admin/login", "lock-keyhole"),
     ];
 
     let links = items
@@ -1502,10 +1742,10 @@ fn bottom_nav(active: &str) -> String {
                 ""
             };
             format!(
-                r#"<a class="nav-item{}" href="{}"><span class="nav-css-icon {}"></span><strong>{}</strong>{}</a>"#,
+                r#"<a class="nav-item{}" href="{}">{}<strong>{}</strong>{}</a>"#,
                 if *id == active { " active" } else { "" },
                 href,
-                icon,
+                icon_svg(icon),
                 label,
                 cart_count
             )
@@ -1568,10 +1808,107 @@ mod tests {
         assert_eq!(html.matches("class=\"dish-card\"").count(), 3);
         assert!(html.contains("<span id=\"visible-count\">3</span> dish(es) available"));
         assert!(html.contains("id=\"dish-D01\""));
+        assert!(html.contains("id=\"clear-meal-choices\""));
+        assert!(html.contains("id=\"clear-meal-result\""));
+        assert!(html.contains("data-meal-context"));
         assert!(!html.contains("category-strip"));
         assert!(html.contains("Preston's Restaurant"));
         assert!(!html.contains("QR Restaurant Ordering"));
         assert!(!html.contains("data-feedback-dish"));
+    }
+
+    #[test]
+    fn cart_page_exposes_stable_grid_and_summary_hooks() {
+        let state = WebState::new(vec![test_dish("D01", "Nasi Lemak")], Vec::new());
+        let session = CustomerSession {
+            session_id: "S001".to_string(),
+            customer_name: "Tester".to_string(),
+            customer_phone: "0123456789".to_string(),
+            table_number: "T01".to_string(),
+        };
+
+        let html = cart_page(&state.menu_view(), &session);
+        let script = include_str!("../../static/app.js");
+        let styles = include_str!("../../static/app.css");
+
+        for id in [
+            "cart-page-items",
+            "cart-unique-count",
+            "cart-portions-count",
+            "cart-page-total",
+            "checkout-button",
+        ] {
+            assert_eq!(html.matches(&format!("id=\"{id}\"")).count(), 1);
+        }
+        assert!(script.contains("class=\"cart-item\""));
+        assert!(script.contains("calculateCartTotals"));
+        assert!(script.contains("formatCurrency"));
+        assert!(script.contains("data-action=\"decrease-cart-quantity\""));
+        assert!(script.contains("aria-label=\"Decrease"));
+        assert!(script.contains("aria-label=\"Increase"));
+        assert!(script.contains("aria-label=\"Remove"));
+        assert!(styles.contains("grid-template-areas: \"image details quantity total remove\""));
+        assert!(styles.contains("\"image details remove\""));
+        assert!(styles.contains("\"image quantity quantity\""));
+        assert!(styles.contains("\"image total total\""));
+    }
+
+    #[test]
+    fn customer_and_admin_pages_use_shared_accessible_svg_icons() {
+        let state = WebState::new(vec![test_dish("D01", "Nasi Lemak")], Vec::new());
+        let session = CustomerSession {
+            session_id: "S001".to_string(),
+            customer_name: "Tester".to_string(),
+            customer_phone: "0123456789".to_string(),
+            table_number: "T01".to_string(),
+        };
+        let customer_html = customer_menu_page(&state.menu_view(), &session);
+        let admin_html = admin_page(&state.menu_view(), &state.admin_view());
+
+        for html in [&customer_html, &admin_html] {
+            assert!(html.contains("<svg class=\"icon\""));
+            assert!(html.contains("aria-hidden=\"true\""));
+            assert!(!html.contains("nav-css-icon"));
+            assert!(!html.contains('🍽'));
+            assert!(!html.contains('⌕'));
+        }
+    }
+
+    #[test]
+    fn admin_login_links_back_to_the_customer_menu() {
+        let html = admin_login_page(None, None);
+
+        assert!(html.contains(r#"<a class="ghost-link" href="/">"#));
+        assert!(html.contains("Go to Customer Menu"));
+        assert!(html.contains("<svg class=\"icon\""));
+    }
+
+    #[test]
+    fn stylesheet_uses_catppuccin_latte_tokens_without_legacy_palette() {
+        let styles = include_str!("../../static/app.css");
+
+        for token in [
+            "--ctp-base: #eff1f5",
+            "--ctp-mantle: #e6e9ef",
+            "--ctp-text: #4c4f69",
+            "--ctp-maroon: #e64553",
+            "--ctp-peach: #fe640b",
+            "--ctp-green: #40a02b",
+            "--ctp-lavender: #7287fd",
+        ] {
+            assert!(styles.contains(token), "missing theme token: {token}");
+        }
+        for legacy_value in ["#f6efe5", "#6b3f27", "#c66b3d", "255, 116, 23"] {
+            assert!(
+                !styles.to_lowercase().contains(legacy_value),
+                "legacy palette value remains: {legacy_value}"
+            );
+        }
+        assert!(styles.contains("background: var(--color-primary)"));
+        assert!(styles.contains(".nav-item.active::after"));
+        assert!(styles.contains(r#".responsive-data-table td[data-label="Actions"]"#));
+        assert!(styles.contains("gap: 8px"));
+        assert!(styles.contains("outline: 3px solid rgba(114, 135, 253, 0.65)"));
     }
 
     #[test]
@@ -1612,6 +1949,39 @@ mod tests {
         assert!(html.contains("data-experiment-option-search=\"ingredient-liked\""));
         assert!(html.contains("<span>Coconut Milk</span>"));
         assert!(!html.contains("data-feedback-dish"));
+    }
+
+    #[test]
+    fn recommendation_tester_renders_unique_category_and_workspace_navigation() {
+        let state = WebState::new(
+            vec![
+                test_dish("D01", "Nasi Lemak"),
+                test_dish("D02", "Chicken Satay"),
+            ],
+            Vec::new(),
+        );
+        let html = admin_recommendations_page(&state.menu_view(), &state.admin_view());
+
+        for category in ["production", "experiments", "explainability", "learning"] {
+            assert!(html.contains(&format!("data-tester-category=\"{category}\"")));
+        }
+        for panel in [
+            "production-adaptive",
+            "production-meal-sets",
+            "controlled-experiments",
+            "explainability-counterfactual",
+            "explainability-simulation",
+            "learning-timeline",
+        ] {
+            assert_eq!(
+                html.matches(&format!("data-tool-panel=\"{panel}\""))
+                    .count(),
+                1
+            );
+        }
+        assert!(html.contains("id=\"clear-learning-timeline\""));
+        assert!(html.contains("id=\"timeline-confirm-dialog\""));
+        assert!(html.contains("id=\"reset-timeline-filters\""));
     }
 
     #[test]

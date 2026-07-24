@@ -22,7 +22,7 @@ const ADMIN_SESSION_MAX_AGE_SECONDS: u32 = 12 * 60 * 60;
 
 /// Renders the staff/admin dashboard.
 ///
-/// Admin pages share the same orange/white visual language as the customer app,
+/// Admin pages share the same Catppuccin Latte visual language as the customer app,
 /// but use denser cards and tables because staff need to scan operational data.
 pub async fn admin_login_page() -> Html<String> {
     Html(templates::admin_login_page(None, None))

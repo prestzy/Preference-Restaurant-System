@@ -2,6 +2,25 @@ const CART_KEY = "fyp_web_cart_v1";
 const LAST_ORDER_KEY = "fyp_last_order_id_v1";
 const CUSTOMER_KEY = "fyp_customer_identity_v1";
 
+function showToast(message) {
+  let region = document.getElementById("app-toast-region");
+  if (!region) {
+    region = document.createElement("div");
+    region.id = "app-toast-region";
+    region.className = "toast-region";
+    region.setAttribute("aria-live", "polite");
+    document.body.appendChild(region);
+  }
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.textContent = message;
+  region.appendChild(toast);
+  window.setTimeout(() => {
+    toast.classList.add("leaving");
+    window.setTimeout(() => toast.remove(), 220);
+  }, 2600);
+}
+
 function readCart() {
   try {
     return JSON.parse(localStorage.getItem(CART_KEY)) || {};
@@ -43,6 +62,34 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+// Dynamic UI uses the same Lucide-compatible inline SVG subset as the Rust
+// templates. Icons inherit `currentColor`, stay sharp at every viewport, and
+// remain decorative while the surrounding control supplies its accessible
+// label.
+function iconSvg(name) {
+  const paths = {
+    plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+    minus: '<path d="M5 12h14"/>',
+    "trash-2":
+      '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/>',
+    utensils:
+      '<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2Z"/><path d="M18 22v-7"/>',
+    "circle-info":
+      '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+    "shopping-cart":
+      '<circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h7.72a2 2 0 0 0 2-1.61L20.05 7H5.12"/>',
+  };
+  return `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${
+    paths[name] || '<circle cx="12" cy="12" r="9"/>'
+  }</svg>`;
+}
+
+// Formats every browser-rendered Malaysian Ringgit value consistently.
+function formatCurrency(amount) {
+  const value = Number(amount || 0);
+  return `RM${(Number.isFinite(value) ? value : 0).toFixed(2)}`;
 }
 
 function formatList(values) {
@@ -127,11 +174,30 @@ function parsePriceAmount(dish) {
   return Number(dish?.price_amount || 0);
 }
 
+function calculateCartTotals(cart = readCart()) {
+  return Object.entries(cart).reduce(
+    (totals, [dishId, rawQuantity]) => {
+      const dish = dishById(dishId);
+      const quantity = Math.max(0, Number(rawQuantity || 0));
+      if (!dish || quantity === 0) return totals;
+      totals.uniqueDishes += 1;
+      totals.totalPortions += quantity;
+      totals.subtotal += parsePriceAmount(dish) * quantity;
+      return totals;
+    },
+    { uniqueDishes: 0, totalPortions: 0, subtotal: 0 }
+  );
+}
+
+window.CartCalculations = { formatCurrency, calculateCartTotals };
+
 function imageHtml(dish, extraClass = "") {
   if (dish?.image_url) {
     return `<div class="dish-art ${extraClass}"><img src="${escapeHtml(dish.image_url)}" alt="${escapeHtml(dish.name)}"></div>`;
   }
-  return `<div class="dish-art placeholder ${extraClass}" aria-label="No image">🍽</div>`;
+  return `<div class="dish-art placeholder ${extraClass}" aria-label="No image">${iconSvg(
+    "utensils"
+  )}</div>`;
 }
 
 function dishSearchHaystack(dish) {
@@ -453,10 +519,10 @@ function setupCartButtons() {
     button.dataset.bound = "true";
     button.addEventListener("click", () => {
       addToCart(button.dataset.addCart);
-      const original = button.textContent;
-      button.textContent = "Added";
+      const original = button.innerHTML;
+      button.innerHTML = `${iconSvg("shopping-cart")} Added`;
       window.setTimeout(() => {
-        button.textContent = original || "Add";
+        button.innerHTML = original || `${iconSvg("plus")} Add`;
       }, 800);
     });
   });
@@ -499,7 +565,12 @@ function setupDiversitySelector() {
     button.addEventListener("click", () => {
       document.querySelectorAll("[data-diversity-mode]").forEach((item) => {
         item.classList.toggle("active", item === button);
+        item.setAttribute("aria-pressed", String(item === button));
       });
+      if (mealSetUiState.configuration) {
+        mealSetUiState.configuration.diversityMode = button.dataset.diversityMode || "balanced";
+        renderMealSetConfiguration();
+      }
       refreshCustomerRecommendations();
     });
   });
@@ -534,6 +605,7 @@ function setupPreferencePanels() {
         }
 
         if (scope === "customer") {
+          syncMealSetPreferencesFromDom();
           refreshCustomerRecommendations();
         }
       });
@@ -544,6 +616,7 @@ function setupPreferencePanels() {
         chip.classList.remove("active");
       });
       if (scope === "customer") {
+        syncMealSetPreferencesFromDom();
         refreshCustomerRecommendations();
       }
     });
@@ -593,8 +666,8 @@ function renderRecommendationCard(recommendation) {
         <span class="reason">${escapeHtml(shortRecommendationReason(recommendation))}</span>
         <strong>${escapeHtml(dish.price)}</strong>
         <div class="card-actions">
-          <button class="add-button" data-add-cart="${escapeHtml(dish.dish_id)}" type="button">Add</button>
-          <button class="ghost-action" data-view-dish="${escapeHtml(dish.dish_id)}" type="button">Why this?</button>
+          <button class="add-button" data-add-cart="${escapeHtml(dish.dish_id)}" type="button">${iconSvg("plus")} Add</button>
+          <button class="ghost-action" data-view-dish="${escapeHtml(dish.dish_id)}" type="button">${iconSvg("circle-info")} Why this?</button>
         </div>
       </div>
     </article>
@@ -704,7 +777,7 @@ function showDishDetail(dishId) {
               </div>`
             : ""
         }
-        <button class="primary-action" data-add-cart="${escapeHtml(dish.dish_id)}" type="button">Add to Cart</button>
+        <button class="primary-action" data-add-cart="${escapeHtml(dish.dish_id)}" type="button">${iconSvg("shopping-cart")} Add to Cart</button>
       </div>
     </div>
   `;
@@ -717,54 +790,262 @@ function showDishDetail(dishId) {
   }
 }
 
+const MEAL_SET_DEFAULTS = Object.freeze({
+  budget: "60",
+  partySize: 2,
+  targetDishCount: null,
+  topSetCount: 3,
+  diversityMode: "balanced",
+});
+
+// Configuration, request progress, generated data, and errors intentionally
+// remain independent. Generating a result can therefore never freeze or erase
+// the customer's current choices.
+const mealSetUiState = {
+  configuration: null,
+  loading: false,
+  result: null,
+  error: null,
+};
+
+function defaultMealSetConfiguration() {
+  return {
+    budget: MEAL_SET_DEFAULTS.budget,
+    partySize: MEAL_SET_DEFAULTS.partySize,
+    targetDishCount: MEAL_SET_DEFAULTS.targetDishCount,
+    topSetCount: MEAL_SET_DEFAULTS.topSetCount,
+    requiredCategories: new Set(),
+    likedIngredients: new Set(),
+    dislikedIngredients: new Set(),
+    preferredTags: new Set(),
+    selectedDishIds: new Set(),
+    diversityMode: MEAL_SET_DEFAULTS.diversityMode,
+  };
+}
+
+function syncMealSetPreferencesFromDom() {
+  if (!mealSetUiState.configuration) return;
+  const preferences = collectPreferences("customer");
+  mealSetUiState.configuration.likedIngredients = new Set(preferences.liked_ingredients || []);
+  mealSetUiState.configuration.dislikedIngredients = new Set(
+    preferences.disliked_ingredients || []
+  );
+  mealSetUiState.configuration.preferredTags = new Set(preferences.preferred_tags || []);
+}
+
+function syncMealSetConfigurationFromDom() {
+  const configuration = mealSetUiState.configuration;
+  if (!configuration) return;
+  configuration.budget = document.getElementById("meal-budget")?.value || "";
+  configuration.partySize = Number(document.getElementById("meal-party-size")?.value || 0);
+  const targetCount = Number(document.getElementById("meal-target-count")?.value || 0);
+  configuration.targetDishCount = targetCount > 0 ? targetCount : null;
+  configuration.topSetCount = Number(document.getElementById("meal-set-count")?.value || 3);
+  configuration.requiredCategories = new Set(
+    Array.from(document.querySelectorAll("[data-meal-category]:checked")).map(
+      (input) => input.value
+    )
+  );
+  configuration.selectedDishIds = new Set(
+    Array.from(document.querySelectorAll("[data-meal-context]:checked")).map(
+      (input) => input.value
+    )
+  );
+  configuration.diversityMode =
+    document.querySelector("[data-diversity-mode].active")?.dataset.diversityMode || "balanced";
+  syncMealSetPreferencesFromDom();
+}
+
+function renderMealSetConfiguration() {
+  const configuration = mealSetUiState.configuration;
+  if (!configuration) return;
+  const setValue = (id, value) => {
+    const field = document.getElementById(id);
+    if (field) field.value = value ?? "";
+  };
+  setValue("meal-budget", configuration.budget);
+  setValue("meal-party-size", configuration.partySize);
+  setValue("meal-target-count", configuration.targetDishCount);
+  setValue("meal-set-count", configuration.topSetCount);
+
+  document.querySelectorAll("[data-meal-category]").forEach((input) => {
+    input.checked = configuration.requiredCategories.has(input.value);
+  });
+  document.querySelectorAll("[data-meal-context]").forEach((input) => {
+    input.checked = configuration.selectedDishIds.has(input.value);
+  });
+  document.querySelectorAll("[data-diversity-mode]").forEach((button) => {
+    const selected = button.dataset.diversityMode === configuration.diversityMode;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+
+  const descriptions = {
+    familiar: "Familiar prioritises strong preference and popularity evidence.",
+    balanced: "Balanced combines familiar matches with some variety.",
+    discover: "Discover introduces more novel dishes while respecting exclusions.",
+  };
+  const description = document.getElementById("diversity-description");
+  if (description) {
+    description.textContent =
+      descriptions[configuration.diversityMode] || descriptions.balanced;
+  }
+}
+
+function setMealSetLoading(loading) {
+  mealSetUiState.loading = loading;
+  document
+    .querySelectorAll(
+      "[data-meal-control], [data-meal-category], [data-meal-context]"
+    )
+    .forEach((control) => {
+      control.disabled = loading;
+    });
+  const button = document.getElementById("build-meal-set");
+  if (button) button.textContent = loading ? "Generating..." : "Generate Meal Set";
+}
+
+function renderMealSetResult() {
+  const target = document.getElementById("meal-set-results");
+  if (!target) return;
+  if (!mealSetUiState.result) {
+    target.innerHTML = `
+      <div class="empty-state">
+        <strong>No meal set has been generated yet.</strong>
+        <span>Choose your table settings and generate a meal set when ready.</span>
+      </div>`;
+    return;
+  }
+
+  const configuration = mealSetUiState.configuration;
+  const mode =
+    configuration.diversityMode.charAt(0).toUpperCase() +
+    configuration.diversityMode.slice(1);
+  target.innerHTML = `
+    <div class="meal-result-heading" tabindex="-1">
+      <h3>Meal set results</h3>
+      <p>${formatCurrency(configuration.budget)} · ${
+        configuration.partySize
+      } people · ${mode} style</p>
+    </div>
+    ${(mealSetUiState.result || []).map(renderMealSet).join("")}`;
+  target.querySelectorAll("[data-add-meal-set]").forEach((addButton) => {
+    addButton.addEventListener("click", () => {
+      const ids = JSON.parse(addButton.dataset.addMealSet || "[]");
+      const cart = readCart();
+      ids.forEach((id) => {
+        cart[id] = Math.max(1, Number(cart[id] || 0));
+      });
+      writeCart(cart);
+      addButton.textContent = "Added to Cart";
+      showToast("Meal set added to Cart.");
+    });
+  });
+}
+
+// Clear Choices is the single reset path for every meal-set input. Cart,
+// profile, order history, dish availability, and server recommendation data
+// are deliberately not changed.
+function resetMealSetForm() {
+  mealSetUiState.configuration = defaultMealSetConfiguration();
+  mealSetUiState.loading = false;
+  mealSetUiState.result = null;
+  mealSetUiState.error = null;
+  document
+    .querySelectorAll('[data-preference-scope="customer"] .mini-chip.active')
+    .forEach((chip) => chip.classList.remove("active"));
+  renderMealSetConfiguration();
+  renderMealSetResult();
+  setMealSetLoading(false);
+  const status = document.getElementById("meal-set-status");
+  if (status) status.textContent = "";
+  refreshCustomerRecommendations();
+}
+
+function clearMealSetResult() {
+  mealSetUiState.result = null;
+  mealSetUiState.error = null;
+  renderMealSetResult();
+  const status = document.getElementById("meal-set-status");
+  if (status) status.textContent = "";
+}
+
+function mealSetPayload() {
+  const configuration = mealSetUiState.configuration;
+  return {
+    budget_cents: Math.round(Number(configuration.budget || 0) * 100),
+    party_size: configuration.partySize,
+    target_dish_count: configuration.targetDishCount,
+    top_set_count: configuration.topSetCount,
+    liked_ingredients: Array.from(configuration.likedIngredients),
+    disliked_ingredients: Array.from(configuration.dislikedIngredients),
+    preferred_tags: Array.from(configuration.preferredTags),
+    selected_dish_ids: Array.from(configuration.selectedDishIds),
+    required_categories: Array.from(configuration.requiredCategories),
+    diversity_mode: configuration.diversityMode,
+  };
+}
+
 function setupMealSetBuilder() {
   const button = document.getElementById("build-meal-set");
+  const clearChoices = document.getElementById("clear-meal-choices");
+  const clearResult = document.getElementById("clear-meal-result");
   const status = document.getElementById("meal-set-status");
-  const target = document.getElementById("meal-set-results");
-  if (!button || !status || !target) return;
+  if (!button || !status) return;
+
+  mealSetUiState.configuration = defaultMealSetConfiguration();
+  mealSetUiState.configuration.selectedDishIds = new Set(Object.keys(readCart()));
+  syncMealSetPreferencesFromDom();
+  renderMealSetConfiguration();
+
+  ["meal-budget", "meal-party-size", "meal-target-count", "meal-set-count"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("input", syncMealSetConfigurationFromDom);
+  });
+  document.querySelectorAll("[data-meal-category], [data-meal-context]").forEach((input) => {
+    input.addEventListener("change", syncMealSetConfigurationFromDom);
+  });
+
+  clearChoices?.addEventListener("click", () => {
+    resetMealSetForm();
+    showToast("Meal-set choices cleared.");
+  });
+  clearResult?.addEventListener("click", () => {
+    clearMealSetResult();
+    showToast("Meal-set result cleared. Your choices were kept.");
+  });
 
   button.addEventListener("click", async () => {
-    const preferences = collectPreferences("customer");
-    const budget = Number(document.getElementById("meal-budget")?.value || 0);
-    const targetCount = Number(document.getElementById("meal-target-count")?.value || 0);
-    const payload = {
-      ...preferences,
-      budget_cents: Math.round(budget * 100),
-      party_size: Number(document.getElementById("meal-party-size")?.value || 0),
-      target_dish_count: targetCount > 0 ? targetCount : null,
-      top_set_count: Number(document.getElementById("meal-set-count")?.value || 3),
-      required_categories: Array.from(
-        document.querySelectorAll("[data-meal-category]:checked")
-      ).map((input) => input.value),
-    };
-    button.disabled = true;
-    status.textContent = "Building meal sets...";
-    target.innerHTML = "";
+    syncMealSetConfigurationFromDom();
+    const configuration = mealSetUiState.configuration;
+    if (Number(configuration.budget) <= 0 || configuration.partySize <= 0) {
+      mealSetUiState.error = "Enter a budget and party size greater than zero.";
+      status.textContent = mealSetUiState.error;
+      return;
+    }
+
+    setMealSetLoading(true);
+    mealSetUiState.error = null;
+    status.textContent = "Generating meal sets...";
     try {
       const response = await fetch("/api/recommendations/meal-set", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(mealSetPayload()),
       });
       const result = await response.json();
       if (!result.ok) throw new Error(result.message || "Unable to build a meal set.");
+      mealSetUiState.result = result.data || [];
       status.textContent = result.message;
-      target.innerHTML = (result.data || []).map(renderMealSet).join("");
-      target.querySelectorAll("[data-add-meal-set]").forEach((addButton) => {
-        addButton.addEventListener("click", () => {
-          const ids = JSON.parse(addButton.dataset.addMealSet || "[]");
-          const cart = readCart();
-          ids.forEach((id) => {
-            cart[id] = Math.max(1, Number(cart[id] || 0));
-          });
-          writeCart(cart);
-          addButton.textContent = "Added to Cart";
-        });
-      });
+      renderMealSetResult();
+      document.querySelector(".meal-result-heading")?.focus({ preventScroll: true });
+      showToast("Meal set generated.");
     } catch (error) {
-      status.textContent = error.message || "Unable to build a meal set.";
+      mealSetUiState.error = error.message || "Unable to build a meal set.";
+      status.textContent = mealSetUiState.error;
     } finally {
-      button.disabled = false;
+      // Every success and failure path restores the controls, preventing the
+      // one-use locked state seen in the previous implementation.
+      setMealSetLoading(false);
     }
   });
 }
@@ -781,7 +1062,7 @@ function renderMealSet(set, index) {
   const ids = JSON.stringify((set.dishes || []).map((dish) => dish.dish_id));
   return `
     <article class="meal-set-card">
-      <div class="section-heading"><div><h3>Set ${index + 1}</h3><p>${escapeHtml((set.represented_categories || []).join(" · "))}</p></div><strong>RM ${(Number(set.total_price_cents || 0) / 100).toFixed(2)}</strong></div>
+      <div class="section-heading"><div><h3>Set ${index + 1}</h3><p>${escapeHtml((set.represented_categories || []).join(" · "))}</p></div><strong>${formatCurrency(Number(set.total_price_cents || 0) / 100)}</strong></div>
       <ul class="meal-dish-list">${dishes}</ul>
       <div class="meal-score-grid">
         <span>Set score <strong>${Number(set.final_set_score || 0).toFixed(2)}</strong></span>
@@ -789,7 +1070,7 @@ function renderMealSet(set, index) {
         <span>Category coverage <strong>${Math.round(Number(set.category_coverage || 0) * 100)}%</strong></span>
         <span>Pair compatibility <strong>${Math.round(Number(set.pair_compatibility || 0) * 100)}%</strong></span>
         <span>Set diversity <strong>${Math.round(Number(set.set_diversity || 0) * 100)}%</strong></span>
-        <span>Budget remaining <strong>RM ${(Number(set.remaining_budget_cents || 0) / 100).toFixed(2)}</strong></span>
+        <span>Budget remaining <strong>${formatCurrency(Number(set.remaining_budget_cents || 0) / 100)}</strong></span>
       </div>
       <details><summary>Why this set?</summary><ul>${notes}</ul></details>
       <button class="primary-action" type="button" data-add-meal-set='${escapeHtml(ids)}'>Add Entire Set</button>
@@ -822,51 +1103,73 @@ function closeDishDetail() {
 function renderCartPage() {
   const container = document.getElementById("cart-page-items");
   const totalElement = document.getElementById("cart-page-total");
+  const uniqueElement = document.getElementById("cart-unique-count");
+  const portionsElement = document.getElementById("cart-portions-count");
   if (!container || !totalElement) {
     return;
   }
 
   const cart = readCart();
   const entries = Object.entries(cart);
+  const totals = calculateCartTotals(cart);
+  if (uniqueElement) uniqueElement.textContent = String(totals.uniqueDishes);
+  if (portionsElement) portionsElement.textContent = String(totals.totalPortions);
+  totalElement.textContent = formatCurrency(totals.subtotal);
 
   if (!entries.length) {
     container.innerHTML =
       '<div class="info-card"><strong>Your cart is empty</strong><span>Add dishes from Home.</span></div>';
-    totalElement.textContent = "RM 0";
     return;
   }
 
-  let total = 0;
   container.innerHTML = entries
-    .map(([dishId, quantity]) => {
+    .map(([dishId, rawQuantity]) => {
       const dish = dishById(dishId);
       if (!dish) {
         return "";
       }
-      const lineTotal = parsePriceAmount(dish) * quantity;
-      total += lineTotal;
+      const quantity = Math.max(1, Number(rawQuantity || 1));
+      const unitPrice = parsePriceAmount(dish);
+      const lineTotal = unitPrice * quantity;
       return `
-        <div class="cart-row">
-          <div class="cart-dish">
-            ${imageHtml(dish, "cart-thumb")}
-            <div>
-              <strong>${escapeHtml(dish.name)}</strong>
-              <span>${escapeHtml(dish.category)} · ${escapeHtml(dish.price)}</span>
+        <article class="cart-item" data-cart-dish-id="${escapeHtml(dishId)}">
+          ${imageHtml(dish, "cart-item__image")}
+          <div class="cart-item__details">
+            <h3 class="cart-item__name">${escapeHtml(dish.name)}</h3>
+            <p class="cart-item__category">${escapeHtml(dish.category)}</p>
+            <p class="cart-item__unit-price">${formatCurrency(unitPrice)} each</p>
+          </div>
+          <div class="cart-item__quantity">
+            <span class="cart-field-label">Quantity</span>
+            <div class="quantity-stepper">
+              <button type="button" data-action="decrease-cart-quantity" data-cart-decrease="${escapeHtml(
+                dishId
+              )}" aria-label="Decrease ${escapeHtml(
+                dish.name
+              )} quantity" title="Decrease quantity">${iconSvg("minus")}</button>
+              <output class="quantity-stepper__value" aria-live="polite" aria-label="${escapeHtml(
+                dish.name
+              )} quantity">${quantity}</output>
+              <button type="button" data-action="increase-cart-quantity" data-cart-increase="${escapeHtml(
+                dishId
+              )}" aria-label="Increase ${escapeHtml(
+                dish.name
+              )} quantity" title="Increase quantity">${iconSvg("plus")}</button>
             </div>
           </div>
-          <div class="quantity-control">
-            <button type="button" data-cart-decrease="${escapeHtml(dishId)}">−</button>
-            <strong>${quantity}</strong>
-            <button type="button" data-cart-increase="${escapeHtml(dishId)}">+</button>
+          <div class="cart-item__total">
+            <span class="cart-field-label">Total</span>
+            <strong class="cart-item__total-price">${formatCurrency(lineTotal)}</strong>
           </div>
-          <strong>RM ${lineTotal}</strong>
-          <button class="ghost-action" type="button" data-remove-cart="${escapeHtml(dishId)}">Remove</button>
-        </div>
+          <button class="cart-item__remove icon-button danger-icon" type="button" data-action="remove-cart-item" data-remove-cart="${escapeHtml(
+            dishId
+          )}" aria-label="Remove ${escapeHtml(
+            dish.name
+          )} from cart" title="Remove from cart">${iconSvg("trash-2")}</button>
+        </article>
       `;
     })
     .join("");
-
-  totalElement.textContent = `RM ${total}`;
 
   document.querySelectorAll("[data-cart-decrease]").forEach((button) => {
     button.addEventListener("click", () => changeCartQuantity(button.dataset.cartDecrease, -1));
@@ -1011,6 +1314,216 @@ function setupAdminTools() {
   setupAdminRecommendationTester();
   setupAdminInsights();
   setupSimulationTester();
+  setupAdminMealSetTester();
+  setupRecommendationTesterNavigation();
+}
+
+function setupRecommendationTesterNavigation() {
+  const overview = document.querySelector("[data-tester-overview]");
+  const shell = document.querySelector("[data-tester-shell]");
+  const panels = Array.from(document.querySelectorAll("[data-tool-panel]"));
+  const categories = Array.from(document.querySelectorAll("[data-tester-category]"));
+  const tools = Array.from(document.querySelectorAll("[data-tester-tool]"));
+  const categorySelect = document.getElementById("tester-category-select");
+  if (!overview || !shell || !panels.length) return;
+
+  const defaultTools = {
+    production: "adaptive",
+    experiments: "ingredient-impact",
+    explainability: "counterfactual",
+    learning: "timeline",
+  };
+
+  const showOverview = (updateHash = true) => {
+    overview.hidden = false;
+    shell.hidden = true;
+    panels.forEach((panel) => {
+      panel.hidden = true;
+    });
+    if (updateHash) window.location.hash = "overview";
+  };
+
+  const activate = (category, tool, updateHash = true) => {
+    const selectedTool =
+      tools.find(
+        (button) =>
+          button.dataset.toolCategory === category && button.dataset.testerTool === tool
+      ) ||
+      tools.find(
+        (button) =>
+          button.dataset.toolCategory === category &&
+          button.dataset.testerTool === defaultTools[category]
+      );
+    if (!selectedTool) {
+      showOverview(updateHash);
+      return;
+    }
+
+    overview.hidden = true;
+    shell.hidden = false;
+    categories.forEach((button) => {
+      const active = button.dataset.testerCategory === category;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-current", active ? "page" : "false");
+    });
+    tools.forEach((button) => {
+      button.hidden = button.dataset.toolCategory !== category;
+      const active = button === selectedTool;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    panels.forEach((panel) => {
+      panel.hidden = panel.dataset.toolPanel !== selectedTool.dataset.toolTarget;
+    });
+    if (categorySelect) categorySelect.value = category;
+
+    // Controlled experiment shortcuts retain the existing tested tab logic;
+    // the category layer only decides which primary workspace is visible.
+    const experiment = selectedTool.dataset.experimentShortcut;
+    if (experiment) {
+      document.querySelector(`[data-experiment-tab="${experiment}"]`)?.click();
+    }
+    if (updateHash) {
+      window.location.hash = `${category}/${selectedTool.dataset.testerTool}`;
+    }
+  };
+
+  categories.forEach((button) => {
+    button.addEventListener("click", () =>
+      activate(
+        button.dataset.testerCategory,
+        button.dataset.defaultTool || defaultTools[button.dataset.testerCategory]
+      )
+    );
+  });
+  tools.forEach((button) => {
+    button.addEventListener("click", () =>
+      activate(button.dataset.toolCategory, button.dataset.testerTool)
+    );
+  });
+  document.querySelectorAll("[data-open-tester-category]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const category = button.dataset.openTesterCategory;
+      activate(category, defaultTools[category]);
+    });
+  });
+  document.querySelector("[data-tester-home]")?.addEventListener("click", () => showOverview());
+  categorySelect?.addEventListener("change", () =>
+    activate(categorySelect.value, defaultTools[categorySelect.value])
+  );
+
+  const restoreFromHash = () => {
+    const raw = window.location.hash.replace(/^#/, "");
+    if (!raw || raw === "overview") {
+      showOverview(false);
+      return;
+    }
+    const [category, tool] = raw.split("/");
+    activate(category, tool || defaultTools[category], false);
+  };
+  window.addEventListener("hashchange", restoreFromHash);
+  restoreFromHash();
+}
+
+function setupAdminMealSetTester() {
+  const run = document.getElementById("run-admin-meal-set");
+  const reset = document.getElementById("reset-admin-meal-set");
+  const clear = document.getElementById("clear-admin-meal-result");
+  const target = document.getElementById("admin-meal-results");
+  const status = document.getElementById("admin-meal-status");
+  if (!run || !target || !status) return;
+  const selected = (id) =>
+    Array.from(document.getElementById(id)?.selectedOptions || []).map(
+      (option) => option.value
+    );
+  const clearSelections = () => {
+    ["admin-meal-liked", "admin-meal-disliked", "admin-meal-tags", "admin-meal-context"].forEach(
+      (id) => {
+        Array.from(document.getElementById(id)?.options || []).forEach((option) => {
+          option.selected = false;
+        });
+      }
+    );
+  };
+
+  run.addEventListener("click", async () => {
+    const budget = Number(document.getElementById("admin-meal-budget")?.value || 0);
+    const party = Number(document.getElementById("admin-meal-party")?.value || 0);
+    const targetCount = Number(document.getElementById("admin-meal-target")?.value || 0);
+    if (budget <= 0 || party <= 0) {
+      status.textContent = "Enter a budget and party size greater than zero.";
+      return;
+    }
+    run.disabled = true;
+    run.textContent = "Generating...";
+    status.textContent = "Running the production meal-set service...";
+    try {
+      const response = await fetch("/api/recommendations/meal-set", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          budget_cents: Math.round(budget * 100),
+          party_size: party,
+          target_dish_count: targetCount > 0 ? targetCount : null,
+          top_set_count: 3,
+          liked_ingredients: selected("admin-meal-liked"),
+          disliked_ingredients: selected("admin-meal-disliked"),
+          preferred_tags: selected("admin-meal-tags"),
+          selected_dish_ids: selected("admin-meal-context"),
+          required_categories: [],
+          diversity_mode:
+            document.getElementById("admin-meal-diversity")?.value || "balanced",
+        }),
+      });
+      const result = await response.json();
+      if (!result.ok) throw new Error(result.message);
+      target.innerHTML = (result.data || []).map(renderAdminMealSet).join("");
+      status.textContent = result.message;
+    } catch (error) {
+      status.textContent = error.message || "Unable to generate meal sets.";
+    } finally {
+      run.disabled = false;
+      run.textContent = "Generate Meal Set";
+    }
+  });
+  clear?.addEventListener("click", () => {
+    target.innerHTML = "";
+    status.textContent = "";
+  });
+  reset?.addEventListener("click", () => {
+    document.getElementById("admin-meal-budget").value = 60;
+    document.getElementById("admin-meal-party").value = 2;
+    document.getElementById("admin-meal-target").value = "";
+    document.getElementById("admin-meal-diversity").value = "balanced";
+    clearSelections();
+    target.innerHTML = "";
+    status.textContent = "";
+  });
+}
+
+function renderAdminMealSet(set, index) {
+  const dishes = (set.dishes || [])
+    .map(
+      (dish) =>
+        `<li><strong>${escapeHtml(dish.name)}</strong><span>${escapeHtml(
+          dish.dish_id
+        )} · ${escapeHtml(dish.price)}</span></li>`
+    )
+    .join("");
+  return `
+    <article class="meal-set-card">
+      <div class="section-heading"><div><h3>Set ${index + 1}</h3><p>${escapeHtml(
+        (set.represented_categories || []).join(" · ")
+      )}</p></div><strong>${formatCurrency(
+        Number(set.total_price_cents || 0) / 100
+      )}</strong></div>
+      <ul class="meal-dish-list">${dishes}</ul>
+      <p><strong>Preference coverage:</strong> ${Math.round(
+        Number(set.preference_coverage || 0) * 100
+      )}% · <strong>Budget remaining:</strong> ${formatCurrency(
+        Number(set.remaining_budget_cents || 0) / 100
+      )}</p>
+    </article>`;
 }
 
 function setupAdaptiveInspector() {
@@ -1254,30 +1767,156 @@ function setupLearningTimeline() {
   const target = document.getElementById("learning-timeline");
   const status = document.getElementById("learning-timeline-status");
   const rebuild = document.getElementById("rebuild-learning-timeline");
+  const clear = document.getElementById("clear-learning-timeline");
+  const reset = document.getElementById("reset-timeline-filters");
+  const dialog = document.getElementById("timeline-confirm-dialog");
+  const confirmButton = document.getElementById("confirm-timeline-action");
+  const confirmTitle = document.getElementById("timeline-confirm-title");
+  const confirmMessage = document.getElementById("timeline-confirm-message");
   if (!target || !status) return;
+  let events = [];
+  let pendingAction = null;
 
-  const load = async (rebuildRequested = false) => {
-    status.textContent = rebuildRequested ? "Rebuilding timeline..." : "Loading timeline...";
-    try {
-      const response = await fetch(
-        rebuildRequested
-          ? "/api/admin/recommendations/learning-timeline/rebuild"
-          : "/api/admin/recommendations/learning-timeline",
-        { method: rebuildRequested ? "POST" : "GET" }
+  const filterElements = {
+    search: document.getElementById("timeline-search"),
+    date: document.getElementById("timeline-date"),
+    dish: document.getElementById("timeline-dish"),
+    sort: document.getElementById("timeline-sort"),
+    limit: document.getElementById("timeline-limit"),
+  };
+
+  const render = () => {
+    const query = String(filterElements.search?.value || "").trim().toLowerCase();
+    const date = filterElements.date?.value || "";
+    const dishId = filterElements.dish?.value || "";
+    const sort = filterElements.sort?.value || "newest";
+    const limitValue = filterElements.limit?.value || "25";
+    let visible = events.filter((event) => {
+      const searchable = [
+        event.historical_order_id,
+        event.completed_at,
+        event.summary,
+        ...(event.dish_ids || []),
+        ...(event.popularity_changes || []).flatMap((item) => [
+          item.dish_id,
+          item.dish_name,
+        ]),
+      ]
+        .join(" ")
+        .toLowerCase();
+      return (
+        (!query || searchable.includes(query)) &&
+        (!date || String(event.completed_at || "").startsWith(date)) &&
+        (!dishId || (event.dish_ids || []).includes(dishId))
       );
+    });
+    if (sort === "oldest") visible = visible.reverse();
+    if (limitValue !== "all") visible = visible.slice(0, Number(limitValue || 25));
+
+    if (!events.length) {
+      target.innerHTML = `<div class="empty-state"><strong>No learning timeline entries are currently stored.</strong><span>Historical orders and recommendation evidence are still available. Use Rebuild Timeline to reconstruct the explanation history.</span></div>`;
+      return;
+    }
+    target.innerHTML = visible.length
+      ? visible.map(renderLearningEvent).join("")
+      : `<div class="empty-state"><strong>No events match these filters.</strong><span>Reset Filters to show the stored learning history.</span></div>`;
+  };
+
+  const load = async () => {
+    status.textContent = "Loading timeline...";
+    try {
+      const response = await fetch("/api/admin/recommendations/learning-timeline");
       const result = await response.json();
       if (!result.ok) throw new Error(result.message);
       status.textContent = result.data.warning || `${result.data.event_count} learning event(s).`;
-      target.innerHTML = (result.data.events || []).map(renderLearningEvent).join("") ||
-        `<div class="info-card slim"><strong>No learning events yet</strong><span>Complete a real customer order or rebuild from historical orders.</span></div>`;
+      events = result.data.events || [];
+      render();
     } catch (error) {
       status.textContent = error.message || "Unable to load timeline.";
     }
   };
-  rebuild?.addEventListener("click", () => {
-    if (window.confirm("Rebuild explanatory events from durable historical orders?")) load(true);
+
+  const runTimelineAction = async (action) => {
+    const isClear = action === "clear";
+    status.textContent = isClear ? "Clearing timeline..." : "Rebuilding timeline...";
+    [clear, rebuild, reset].forEach((button) => {
+      if (button) button.disabled = true;
+    });
+    try {
+      const response = await fetch(
+        isClear
+          ? "/api/admin/recommendations/learning-timeline"
+          : "/api/admin/recommendations/learning-timeline/rebuild",
+        { method: isClear ? "DELETE" : "POST" }
+      );
+      const result = await response.json();
+      if (!result.ok) throw new Error(result.message);
+      if (isClear) {
+        events = [];
+        status.textContent = `${result.data.removed_event_count} learning event(s) removed. Historical orders were unchanged.`;
+        render();
+        showToast("Learning timeline cleared.");
+      } else {
+        events = result.data.events || [];
+        status.textContent = `${result.data.event_count} learning event(s) rebuilt from historical orders.`;
+        render();
+        showToast("Learning timeline rebuilt.");
+      }
+    } catch (error) {
+      // Existing rendered events are retained when a destructive operation
+      // fails, so the interface never claims data was removed when it was not.
+      status.textContent = error.message || `Unable to ${action} the timeline.`;
+    } finally {
+      [clear, rebuild, reset].forEach((button) => {
+        if (button) button.disabled = false;
+      });
+    }
+  };
+
+  const askForConfirmation = (action) => {
+    pendingAction = action;
+    const isClear = action === "clear";
+    if (confirmTitle) {
+      confirmTitle.textContent = isClear ? "Clear learning timeline?" : "Rebuild learning timeline?";
+    }
+    if (confirmMessage) {
+      confirmMessage.textContent = isClear
+        ? "Clear all recommendation learning timeline entries? This removes only the explanatory timeline records. Historical orders and recommendation evidence will remain unchanged. You can rebuild the timeline later from historical orders."
+        : "Rebuild the recommendation learning timeline from historical orders? Existing timeline entries will be replaced. Historical orders will not be changed.";
+    }
+    if (confirmButton) {
+      confirmButton.textContent = isClear ? "Clear Timeline" : "Rebuild Timeline";
+      confirmButton.classList.toggle("danger-action", isClear);
+      confirmButton.classList.toggle("primary-action", !isClear);
+    }
+    if (typeof dialog?.showModal === "function") dialog.showModal();
+  };
+
+  clear?.addEventListener("click", () => askForConfirmation("clear"));
+  rebuild?.addEventListener("click", () => askForConfirmation("rebuild"));
+  confirmButton?.addEventListener("click", () => {
+    const action = pendingAction;
+    pendingAction = null;
+    dialog?.close();
+    if (action) runTimelineAction(action);
   });
-  load(false);
+  reset?.addEventListener("click", () => {
+    if (filterElements.search) filterElements.search.value = "";
+    if (filterElements.date) filterElements.date.value = "";
+    if (filterElements.dish) filterElements.dish.value = "";
+    if (filterElements.sort) filterElements.sort.value = "newest";
+    if (filterElements.limit) filterElements.limit.value = "25";
+    render();
+    target.querySelectorAll("details[open]").forEach((details) => {
+      details.open = false;
+    });
+    status.textContent = `${events.length} learning event(s). Filters reset; no events were deleted.`;
+  });
+  Object.values(filterElements).forEach((element) => {
+    element?.addEventListener("input", render);
+    element?.addEventListener("change", render);
+  });
+  load();
 }
 
 function renderLearningEvent(event) {

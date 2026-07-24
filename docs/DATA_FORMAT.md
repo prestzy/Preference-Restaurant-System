@@ -64,7 +64,7 @@ Lookup order:
 2. `assets/dishes/{dish_id}.jpg`
 3. `assets/dishes/{dish_id}.png`
 4. `assets/dishes/{dish_id}.jpeg`
-5. Orange/white placeholder if no image exists.
+5. Catppuccin-themed placeholder if no image exists.
 
 Examples:
 

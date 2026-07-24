@@ -6,7 +6,7 @@ The project direction is now QR-based ordering: customers scan a QR code with th
 
 ## Current Features
 
-- Mobile-first orange/white customer menu.
+- Mobile-first Catppuccin Latte customer menu with Maroon actions, Peach accents, and accessible Lavender focus states.
 - Separate customer and staff/admin interfaces.
 - Prototype admin login using `ADMIN_USERNAME` and `ADMIN_PASSWORD`.
 - Unified search and Smart Menu Assistant input for dish keywords or phrases such as `spicy chicken but no beef`.
@@ -15,12 +15,13 @@ The project direction is now QR-based ordering: customers scan a QR code with th
 - “Recommended for You” cards powered by Rust recommendation logic.
 - Familiar, Balanced, and Discover modes with a relevance-protected diversity reranker.
 - Budget-aware meal-set builder using exact integer-cent constraints.
+- Reusable meal-set controls: `Generate Meal Set`, `Clear Choices`, and `Clear Result`.
 - Preference chips generated from the CSV dataset:
   - liked ingredients
   - disliked ingredients
   - preferred tags
 - First-stage temporary customer registration at `/start` with name, phone number, and table number.
-- Cart with quantities, total price placeholder, optional order note, and prototype checkout.
+- Cart with aligned quantity steppers, unit and line prices, unique-dish and portion totals, optional order note, and prototype checkout.
 - Checkout uses the server-side customer session instead of asking for contact details again.
 - Customer Profile page tracks only that customer's active and completed/cancelled session orders.
 - Customer Profile polls order status automatically and updates without a page refresh.
@@ -31,11 +32,14 @@ The project direction is now QR-based ordering: customers scan a QR code with th
 - Staff/admin page for dashboard metrics, live order status, dish management, historical orders, and recommendation testing.
 - Admin Orders polls live order status automatically and remains protected by staff login.
 - Dish Management now starts with search/filter/list controls and opens Add/Edit in a modal form.
+- Recommendation Tester uses four stakeholder-oriented categories: Production, Controlled Experiments, Explainability, and Learning History.
+- Tester category/tool state is retained in the URL hash for direct presentation links and browser navigation.
 - Recommendation Tester includes controlled in-memory random co-order simulation for limited-data demonstrations.
 - Simulation data does not modify `data/orders.csv`.
 - Recommendation Experiment Lab contains three controlled experiments: Ingredient Impact, Co-Order Impact, and Method Comparison.
 - Admin Counterfactual Explorer compares temporary preference/co-order scenarios without changing production data.
 - “How the Recommender Learned” timeline records factual evidence deltas from real completed orders in a separate JSON Lines file.
+- Authenticated timeline controls can reset filters, clear explanation events, or rebuild them from historical orders. Clear never modifies `orders.csv` or recommendation evidence.
 - Stakeholder instructions are available in `docs/recommendation-experiment-lab-manual.md`.
 - CSV-based startup loading and historical completed-order persistence.
 - Popularity fallback so recommendations do not go empty when preference input is limited.
@@ -162,7 +166,7 @@ Image lookup order:
 2. `assets/dishes/{dish_id}.jpg`
 3. `assets/dishes/{dish_id}.png`
 4. `assets/dishes/{dish_id}.jpeg`
-5. Orange/white placeholder if no local image exists.
+5. Warm neutral placeholder if no local image exists.
 
 Image sources can be documented in:
 
@@ -227,10 +231,34 @@ counterfactual comparison, API details, and limitations.
 - `src/web/routes.rs`: Axum route declarations.
 - `src/web/handlers/`: focused HTTP handlers for menu, cart, orders, admin, assistant, and recommendations.
 - `src/web/templates.rs`: server-rendered HTML templates.
-- `static/app.css`: orange/white responsive UI styling.
-- `static/app.js`: lightweight browser behavior for search, preferences, cart, checkout, admin tools, and recommendation refresh.
+- `static/app.css`: shared Catppuccin Latte responsive design system and Cart grid.
+- `static/app.js`: lightweight browser behavior for search, preferences, Cart calculations, checkout, admin tools, and recommendation refresh.
 
 Legacy desktop GUI files remain in `src/gui/` for reference, but `cargo run` now starts the web server.
+
+## Interface Notes
+
+The customer experience is designed for QR access on phones first, then scales
+to tablets and desktop. Search remains a locator only: it shows suggestions and
+scrolls to a matching static Menu card without filtering or reordering the full
+Menu.
+
+`Clear Choices` in Build a Meal Set resets the meal-set configuration and its
+result to defaults. It does not clear the Cart, customer Profile, order history,
+or server data. `Clear Result` removes only generated sets so the same inputs can
+be adjusted and run again.
+
+The Learning History timeline is explanatory data in
+`data/recommendation_learning_events.jsonl`. Admin `Clear Timeline` safely
+replaces only that file with an empty timeline. `Rebuild Timeline` reconstructs
+events deterministically from durable historical orders. See
+[docs/recommendation-tester-guide.md](docs/recommendation-tester-guide.md).
+
+The visual system is documented in
+[docs/ui-design-system.md](docs/ui-design-system.md). It uses official
+Catppuccin Latte tokens, semantic component colours, and one inline
+Lucide-compatible SVG icon set. The Cart uses a shared responsive grid and one
+currency formatter so quantities and prices remain aligned.
 
 ## Validation
 
