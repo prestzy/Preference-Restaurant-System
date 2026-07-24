@@ -1,12 +1,29 @@
 use crate::agent::preference_parser::{ParsedPreference, parse_preference_prompt};
 use crate::data_loader::{ORDERS_PATH, append_completed_order_to_csv, split_csv_field};
 use crate::models::{Dish, Order, RecommendationResult, UserPreference};
+use crate::persistence::learning_events::{
+    LEARNING_EVENTS_PATH, append_learning_event, rewrite_learning_events,
+};
 use crate::persistence::order_details::{
     ORDER_DETAILS_PATH, OrderDetailRecord, append_order_detail, rewrite_order_details,
 };
 use crate::preferences::{PreferenceOptions, extract_preference_options};
+use crate::recommender::adaptive::{
+    AdaptiveScoringConfig, AdaptiveWeights, RecommendationEvidenceProfile,
+};
 use crate::recommender::association_metrics::{AssociationMetric, calculate_association_metric};
-use crate::recommender::hybrid::{RecommendationOutput, generate_recommendations};
+use crate::recommender::counterfactual::{
+    CounterfactualChanges, CounterfactualInput, CounterfactualResult, compare_counterfactual,
+};
+use crate::recommender::diversity_reranker::{DiversityMetrics, DiversityMode};
+use crate::recommender::evidence::RecommendationEvidence;
+use crate::recommender::hybrid::{
+    RecommendationOutput, generate_production_recommendations, generate_recommendations,
+};
+use crate::recommender::learning_timeline::{
+    RecommendationLearningEvent, build_learning_event, rebuild_learning_timeline,
+};
+use crate::recommender::meal_set::{MealSetInput, MealSetRecommendation, recommend_meal_sets};
 use crate::search::{MatchMode, build_search_vocabulary, search_dishes};
 use chrono::Local;
 use serde::{Deserialize, Serialize};
@@ -39,6 +56,9 @@ pub struct WebState {
     order_version: Arc<RwLock<u64>>,
     order_csv_path: Arc<PathBuf>,
     order_details_path: Arc<PathBuf>,
+    learning_events: Arc<RwLock<Vec<RecommendationLearningEvent>>>,
+    learning_events_path: Arc<PathBuf>,
+    learning_timeline_warning: Arc<RwLock<Option<String>>>,
 }
 
 impl WebState {
@@ -57,6 +77,9 @@ impl WebState {
             order_version: Arc::new(RwLock::new(0)),
             order_csv_path: Arc::new(PathBuf::from(ORDERS_PATH)),
             order_details_path: Arc::new(PathBuf::new()),
+            learning_events: Arc::new(RwLock::new(Vec::new())),
+            learning_events_path: Arc::new(PathBuf::new()),
+            learning_timeline_warning: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -64,6 +87,8 @@ impl WebState {
         dishes: Vec<Dish>,
         historical_orders: Vec<Order>,
         order_details: Vec<OrderDetailRecord>,
+        learning_events: Vec<RecommendationLearningEvent>,
+        timeline_warning: Option<String>,
     ) -> Self {
         let live_orders = live_orders_from_details(&dishes, &order_details);
         Self {
@@ -78,6 +103,9 @@ impl WebState {
             order_version: Arc::new(RwLock::new(0)),
             order_csv_path: Arc::new(PathBuf::from(ORDERS_PATH)),
             order_details_path: Arc::new(PathBuf::from(ORDER_DETAILS_PATH)),
+            learning_events: Arc::new(RwLock::new(learning_events)),
+            learning_events_path: Arc::new(PathBuf::from(LEARNING_EVENTS_PATH)),
+            learning_timeline_warning: Arc::new(RwLock::new(timeline_warning)),
         }
     }
 
@@ -104,6 +132,9 @@ impl WebState {
             order_version: Arc::new(RwLock::new(0)),
             order_csv_path: Arc::new(order_csv_path),
             order_details_path: Arc::new(PathBuf::new()),
+            learning_events: Arc::new(RwLock::new(Vec::new())),
+            learning_events_path: Arc::new(PathBuf::new()),
+            learning_timeline_warning: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -195,10 +226,12 @@ impl WebState {
     /// Empty input falls back to a small demo preference profile so the home
     /// page has useful recommendations before the user opens preference chips.
     pub fn recommend(&self, request: RecommendationRequest) -> RecommendationApiResponse {
+        let diversity_mode = DiversityMode::from_label(request.diversity_mode.as_deref());
         let preference = request.into_user_preference_or_default();
         let dishes = self.available_dishes();
         let orders = self.combined_orders();
-        let output = generate_recommendations(&dishes, &orders, &preference);
+        let output =
+            generate_production_recommendations(&dishes, &orders, &preference, diversity_mode);
 
         RecommendationApiResponse {
             recommendations: output
@@ -208,7 +241,118 @@ impl WebState {
                 .map(|result| self.recommendation_view(result))
                 .collect(),
             stats: RecommendationStatsView::from_output(&output),
+            evidence_profile: output.evidence_profile,
+            adaptive_weights: output.adaptive_weights,
+            scoring_config: output.scoring_config,
+            diversity_mode: output.diversity_mode,
+            diversity_metrics: output.diversity_metrics,
         }
+    }
+
+    /// Builds bounded, explainable meal sets from current prices, availability,
+    /// production recommendation scores, and the customer's selected context.
+    pub fn recommend_meal_sets(
+        &self,
+        request: MealSetRequest,
+    ) -> Result<Vec<MealSetRecommendation>, String> {
+        let diversity_mode = DiversityMode::from_label(request.diversity_mode.as_deref());
+        let preference = UserPreference {
+            liked_ingredients: normalize_list(request.liked_ingredients, false),
+            disliked_ingredients: normalize_list(request.disliked_ingredients, false),
+            preferred_tags: normalize_list(request.preferred_tags, false),
+            selected_dish_ids: normalize_list(request.selected_dish_ids, true),
+            time_context: request.time_context,
+            ranking_method: Some("hybrid".to_string()),
+        };
+        let dishes = self.available_dishes();
+        // The current prototype stores whole-RM prices. Converting once to
+        // integer cents keeps all budget comparisons exact.
+        let prices = dishes
+            .iter()
+            .map(|dish| {
+                let amount = self
+                    .price_override_for(&dish.dish_id)
+                    .unwrap_or_else(|| placeholder_price_amount(&dish.dish_id));
+                (dish.dish_id.clone(), amount.saturating_mul(100))
+            })
+            .collect::<HashMap<_, _>>();
+        recommend_meal_sets(
+            &dishes,
+            &self.combined_orders(),
+            &prices,
+            &MealSetInput {
+                budget_cents: request.budget_cents,
+                party_size: request.party_size,
+                target_dish_count: request.target_dish_count,
+                top_set_count: request.top_set_count,
+                preference,
+                required_categories: normalize_list(request.required_categories, false),
+                diversity_mode,
+            },
+        )
+    }
+
+    /// Compares two production recommendation runs using cloned scenario data.
+    pub fn counterfactual(
+        &self,
+        request: CounterfactualRequest,
+    ) -> Result<CounterfactualResult, String> {
+        let baseline_mode = DiversityMode::from_label(request.baseline.diversity_mode.as_deref());
+        let baseline = request.baseline.into_user_preference_or_default();
+        compare_counterfactual(
+            &self.available_dishes(),
+            &self.combined_orders(),
+            &CounterfactualInput {
+                baseline,
+                baseline_diversity_mode: baseline_mode,
+                changes: request.changes,
+                top_k: request.top_k,
+            },
+        )
+    }
+
+    /// Returns persisted timeline events newest first with any recoverable
+    /// persistence warning collected during order completion.
+    pub fn learning_timeline(&self) -> LearningTimelineResponse {
+        let mut events = self
+            .learning_events
+            .read()
+            .expect("learning events lock poisoned")
+            .clone();
+        events.reverse();
+        LearningTimelineResponse {
+            event_count: events.len(),
+            events,
+            warning: self
+                .learning_timeline_warning
+                .read()
+                .expect("timeline warning lock poisoned")
+                .clone(),
+        }
+    }
+
+    /// Deterministically rebuilds explanatory events from durable order history.
+    pub fn rebuild_learning_timeline(&self) -> Result<LearningTimelineResponse, String> {
+        let events = rebuild_learning_timeline(
+            &self
+                .historical_orders
+                .read()
+                .expect("historical orders lock poisoned"),
+            &self.dishes.read().expect("dishes lock poisoned"),
+        );
+        if !self.learning_events_path.as_os_str().is_empty() {
+            rewrite_learning_events(&events, &self.learning_events_path.to_string_lossy())
+                .map_err(|error| format!("Could not rebuild the learning timeline: {error}"))?;
+        }
+        *self
+            .learning_events
+            .write()
+            .expect("learning events lock poisoned") = events;
+        *self
+            .learning_timeline_warning
+            .write()
+            .expect("timeline warning lock poisoned") = None;
+        Ok(self.learning_timeline())
     }
 
     /// Runs canonical customer menu search for the locator suggestion list.
@@ -266,7 +410,12 @@ impl WebState {
         let selected_dish_ids = normalize_list(request.selected_dish_ids, true);
         let preference = parsed.to_user_preference(selected_dish_ids.clone());
         let orders = self.combined_orders();
-        let output = generate_recommendations(&dishes, &orders, &preference);
+        let output = generate_production_recommendations(
+            &dishes,
+            &orders,
+            &preference,
+            DiversityMode::Balanced,
+        );
 
         AssistantResponse {
             understood: parsed.understood_summary.clone(),
@@ -279,6 +428,11 @@ impl WebState {
                 .collect(),
             upsells: self.cart_upsells(&selected_dish_ids),
             stats: RecommendationStatsView::from_output(&output),
+            evidence_profile: output.evidence_profile,
+            adaptive_weights: output.adaptive_weights,
+            scoring_config: output.scoring_config,
+            diversity_mode: output.diversity_mode,
+            diversity_metrics: output.diversity_metrics,
         }
     }
 
@@ -346,6 +500,7 @@ impl WebState {
             selected_dish_ids: request.selected_dish_ids,
             time_context: request.time_context,
             ranking_method: Some("hybrid".to_string()),
+            diversity_mode: None,
         }
         .into_user_preference_or_default();
 
@@ -417,6 +572,7 @@ impl WebState {
             selected_dish_ids: request.selected_dish_ids.clone(),
             time_context: request.time_context.clone(),
             ranking_method: Some("hybrid".to_string()),
+            diversity_mode: None,
         }
         .into_user_preference_or_default();
 
@@ -515,6 +671,7 @@ impl WebState {
             selected_dish_ids: request.selected_dish_ids,
             ranking_method: Some("content-based".to_string()),
             time_context: None,
+            diversity_mode: None,
         }
         .into_user_preference_or_default();
         let dishes = self.available_dishes();
@@ -638,6 +795,7 @@ impl WebState {
             selected_dish_ids: vec![anchor.clone()],
             ranking_method: Some("hybrid".to_string()),
             time_context: None,
+            diversity_mode: None,
         }
         .into_user_preference_or_default();
 
@@ -769,6 +927,7 @@ impl WebState {
             selected_dish_ids: selected,
             ranking_method: Some("hybrid".to_string()),
             time_context: None,
+            diversity_mode: None,
         }
         .into_user_preference_or_default();
         let dishes = self.available_dishes();
@@ -1066,10 +1225,16 @@ impl WebState {
                 .ok_or_else(|| format!("Live order {order_id} was not found."))?
         };
 
-        let persisted_order = if status == OrderStatus::Completed
+        let should_persist = status == OrderStatus::Completed
             && previous_order.status != OrderStatus::Completed
-            && previous_order.historical_order_id.is_none()
-        {
+            && previous_order.historical_order_id.is_none();
+        let history_before_completion = should_persist.then(|| {
+            self.historical_orders
+                .read()
+                .expect("historical orders lock poisoned")
+                .clone()
+        });
+        let persisted_order = if should_persist {
             // Completed orders become durable behavioural data. Persisting
             // before mutating status means a disk error is visible to staff and
             // does not silently mark an unsaved order as completed.
@@ -1105,8 +1270,25 @@ impl WebState {
             order.clone()
         };
 
+        let mut timeline_warning = None;
         if let Some(persisted_order) = &persisted_order {
             self.append_completed_order_to_history(persisted_order);
+            // Timeline generation occurs only after the real order row has
+            // been appended. A timeline failure is explanatory-data failure,
+            // not an order-completion failure, and remains recoverable through
+            // the authenticated rebuild action.
+            let event = build_learning_event(
+                &self.dishes.read().expect("dishes lock poisoned"),
+                history_before_completion.as_deref().unwrap_or(&[]),
+                persisted_order,
+            );
+            if let Err(error) = self.persist_learning_event(event) {
+                timeline_warning = Some(error.clone());
+                *self
+                    .learning_timeline_warning
+                    .write()
+                    .expect("timeline warning lock poisoned") = Some(error);
+            }
         }
         self.update_order_detail_record(&updated_order)
             .map_err(|error| {
@@ -1118,6 +1300,7 @@ impl WebState {
             order: updated_order,
             saved_to_csv: persisted_order.is_some(),
             historical_order_id: persisted_order.as_ref().map(|order| order.order_id.clone()),
+            timeline_warning,
         })
     }
 
@@ -1160,6 +1343,25 @@ impl WebState {
         }
 
         historical_orders.push(completed_order.clone());
+    }
+
+    fn persist_learning_event(&self, event: RecommendationLearningEvent) -> Result<(), String> {
+        let mut events = self
+            .learning_events
+            .write()
+            .expect("learning events lock poisoned");
+        if events
+            .iter()
+            .any(|item| item.historical_order_id == event.historical_order_id)
+        {
+            return Ok(());
+        }
+        if !self.learning_events_path.as_os_str().is_empty() {
+            append_learning_event(&event, &self.learning_events_path.to_string_lossy())
+                .map_err(|error| format!("Order completed, but timeline append failed: {error}"))?;
+        }
+        events.push(event);
+        Ok(())
     }
 
     /// Finds one live/session order for the customer order tracking page.
@@ -1507,6 +1709,16 @@ impl WebState {
             popularity_score: result.popularity_score,
             business_rule_score: result.business_rule_score,
             hybrid_score: result.final_score,
+            base_score: result.base_score,
+            reranked_score: result.reranked_score,
+            base_rank: result.base_rank,
+            reranked_rank: result.reranked_rank,
+            novelty_score: result.novelty_score,
+            max_similarity: result.max_similarity,
+            category_bonus: result.category_bonus,
+            diversity_notes: result.diversity_notes.clone(),
+            adaptive_weights: result.adaptive_weights,
+            evidence: result.evidence.clone(),
             explanation: detailed_recommendation_reason(result, &related_selected_dishes),
             association_base_dish_id: result.association_base_dish_id.clone(),
             association_pair_count: result.association_pair_count,
@@ -1759,6 +1971,16 @@ pub struct RecommendationView {
     pub popularity_score: f32,
     pub business_rule_score: f32,
     pub hybrid_score: f32,
+    pub base_score: f32,
+    pub reranked_score: f32,
+    pub base_rank: usize,
+    pub reranked_rank: usize,
+    pub novelty_score: f32,
+    pub max_similarity: f32,
+    pub category_bonus: f32,
+    pub diversity_notes: Vec<String>,
+    pub adaptive_weights: AdaptiveWeights,
+    pub evidence: RecommendationEvidence,
     pub explanation: String,
     pub association_base_dish_id: Option<String>,
     pub association_pair_count: u32,
@@ -1812,6 +2034,8 @@ pub struct RecommendationRequest {
     pub time_context: Option<String>,
     #[serde(default)]
     pub ranking_method: Option<String>,
+    #[serde(default)]
+    pub diversity_mode: Option<String>,
 }
 
 impl RecommendationRequest {
@@ -1827,11 +2051,58 @@ impl RecommendationRequest {
     }
 }
 
+/// Customer request for a bounded budget-aware meal-set search.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MealSetRequest {
+    pub budget_cents: u32,
+    pub party_size: usize,
+    #[serde(default)]
+    pub target_dish_count: Option<usize>,
+    #[serde(default)]
+    pub top_set_count: Option<usize>,
+    #[serde(default)]
+    pub liked_ingredients: Vec<String>,
+    #[serde(default)]
+    pub disliked_ingredients: Vec<String>,
+    #[serde(default)]
+    pub preferred_tags: Vec<String>,
+    #[serde(default)]
+    pub required_categories: Vec<String>,
+    #[serde(default)]
+    pub selected_dish_ids: Vec<String>,
+    #[serde(default)]
+    pub time_context: Option<String>,
+    #[serde(default)]
+    pub diversity_mode: Option<String>,
+}
+
+/// Admin-only, side-effect-free baseline/change comparison request.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CounterfactualRequest {
+    pub baseline: RecommendationRequest,
+    #[serde(default)]
+    pub changes: CounterfactualChanges,
+    pub top_k: usize,
+}
+
+/// Admin timeline response. Events deliberately contain no customer identity.
+#[derive(Debug, Clone, Serialize)]
+pub struct LearningTimelineResponse {
+    pub event_count: usize,
+    pub events: Vec<RecommendationLearningEvent>,
+    pub warning: Option<String>,
+}
+
 /// JSON response from `/api/recommendations`.
 #[derive(Debug, Clone, Serialize)]
 pub struct RecommendationApiResponse {
     pub recommendations: Vec<RecommendationView>,
     pub stats: RecommendationStatsView,
+    pub evidence_profile: RecommendationEvidenceProfile,
+    pub adaptive_weights: AdaptiveWeights,
+    pub scoring_config: AdaptiveScoringConfig,
+    pub diversity_mode: DiversityMode,
+    pub diversity_metrics: DiversityMetrics,
 }
 
 /// JSON response from `/api/search`.
@@ -1877,6 +2148,11 @@ pub struct AssistantResponse {
     pub recommendations: Vec<RecommendationView>,
     pub upsells: Vec<String>,
     pub stats: RecommendationStatsView,
+    pub evidence_profile: RecommendationEvidenceProfile,
+    pub adaptive_weights: AdaptiveWeights,
+    pub scoring_config: AdaptiveScoringConfig,
+    pub diversity_mode: DiversityMode,
+    pub diversity_metrics: DiversityMetrics,
 }
 
 /// Lightweight admin insight response calculated from order history.
@@ -2173,6 +2449,7 @@ pub struct OrderStatusUpdate {
     pub order: LiveOrder,
     pub saved_to_csv: bool,
     pub historical_order_id: Option<String>,
+    pub timeline_warning: Option<String>,
 }
 
 /// Staff-visible status for live orders.
@@ -2373,22 +2650,21 @@ fn detailed_recommendation_reason(
     }
 
     if reasons.is_empty() {
-        format!(
-            "{} is recommended by hybrid score {:.2}. Formula: 0.45 content + 0.25 co-order + 0.20 popularity + 0.10 time/business.",
-            result.dish.name, result.final_score
-        )
-    } else {
-        format!(
-            "{} is recommended because it {}. Hybrid score {:.2} = content {:.2}, co-order {:.2}, popularity {:.2}, time/business {:.2}.",
-            result.dish.name,
-            reasons.join("; "),
-            result.final_score,
-            result.ingredient_score,
-            result.co_order_score,
-            result.popularity_score,
-            result.business_rule_score
-        )
+        reasons.push("is shown as a deterministic low-evidence fallback".to_string());
     }
+
+    let [content, co_order, popularity, time] = result.adaptive_weights.as_percentages();
+    format!(
+        "{} is recommended because it {}. Score {:.2}; evidence confidence {:.0}%. Adaptive weights: content {}%, co-order {}%, popularity {}%, time/context {}%.",
+        result.dish.name,
+        reasons.join("; "),
+        result.final_score,
+        result.evidence.overall_confidence * 100.0,
+        content,
+        co_order,
+        popularity,
+        time
+    )
 }
 
 fn next_dish_id(dishes: &[Dish]) -> String {
@@ -3198,6 +3474,35 @@ mod tests {
     }
 
     #[test]
+    fn recommendation_api_exposes_adaptive_profile_weights_and_candidate_evidence() {
+        let dishes = vec![
+            dish("D01", "Nasi Lemak", "main", &["rice"], &["signature"]),
+            dish("D02", "Chicken Satay", "main", &["chicken"], &["grilled"]),
+        ];
+        let orders = vec![Order {
+            order_id: "O001".to_string(),
+            session_user_id: "U01".to_string(),
+            ordered_dishes: vec!["D01".to_string(), "D02".to_string()],
+            timestamp: "2026-01-01 12:30".to_string(),
+        }];
+        let state = WebState::new(dishes, orders);
+
+        let response = state.recommend(RecommendationRequest {
+            liked_ingredients: vec!["chicken".to_string()],
+            selected_dish_ids: vec!["D01".to_string()],
+            ..RecommendationRequest::default()
+        });
+
+        assert_eq!(response.evidence_profile.total_order_count, 1);
+        assert!(response.adaptive_weights.validate());
+        assert_eq!(response.recommendations[0].evidence.candidate_pair_count, 1);
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"adaptive_weights\""));
+        assert!(json.contains("\"evidence\""));
+        assert!(json.contains("\"confidence_level\""));
+    }
+
+    #[test]
     fn simulation_is_reproducible_and_does_not_mutate_history() {
         let dishes = vec![
             dish("D01", "Nasi Lemak", "main", &["rice"], &["signature"]),
@@ -3371,6 +3676,15 @@ mod tests {
         assert!(response.rows.iter().all(|row| row.dish_id != "D01"));
         assert!(response.rows.iter().all(|row| row.dish_id != "D02"));
         assert!(response.rows.iter().any(|row| row.dish_id == "D03"));
+        for row in &response.rows {
+            let expected = match row.method.as_str() {
+                "Ingredient-only" => row.ingredient_score,
+                "Co-order-only" => row.co_order_score,
+                "Hybrid 0.4/0.6" => 0.4 * row.ingredient_score + 0.6 * row.co_order_score,
+                method => panic!("unexpected method {method}"),
+            };
+            assert!((row.final_score - expected).abs() < 0.0001);
+        }
     }
 
     #[test]
@@ -3401,22 +3715,33 @@ mod tests {
         ];
         let csv_path = temp_order_csv_path("completed_recommendation");
         let state = WebState::new_with_order_csv_path(dishes, Vec::new(), csv_path.clone());
+        let request = RecommendationRequest {
+            selected_dish_ids: vec!["D01".to_string()],
+            ranking_method: Some("co-ordering".to_string()),
+            ..RecommendationRequest::default()
+        };
+        let before = state.recommend(request.clone());
         let order = state
             .create_live_order(&["D01".to_string(), "D02".to_string()])
             .unwrap();
 
-        state
+        let update = state
             .update_order_status(&order.order_id, OrderStatus::Completed)
             .unwrap();
-        let response = state.recommend(RecommendationRequest {
-            selected_dish_ids: vec!["D01".to_string()],
-            ranking_method: Some("co-ordering".to_string()),
-            ..RecommendationRequest::default()
-        });
+        let response = state.recommend(request);
+        let timeline = state.learning_timeline();
         let _ = fs::remove_file(&csv_path);
 
+        assert!(update.timeline_warning.is_none());
+        assert_eq!(timeline.event_count, 1);
+        assert_eq!(timeline.events[0].historical_order_id, "O001");
         assert_eq!(response.recommendations[0].dish.dish_id, "D02");
         assert!(response.recommendations[0].co_order_score > 0.0);
+        assert!(
+            response.evidence_profile.collaborative_confidence
+                > before.evidence_profile.collaborative_confidence
+        );
+        assert!(response.adaptive_weights.co_order > before.adaptive_weights.co_order);
     }
 
     #[test]
@@ -3449,6 +3774,13 @@ mod tests {
                 .recommendations
                 .iter()
                 .all(|recommendation| recommendation.dish.dish_id != "D01")
+        );
+        assert!(response.adaptive_weights.validate());
+        assert!(
+            response
+                .recommendations
+                .iter()
+                .all(|recommendation| recommendation.evidence.requested_preference_count > 0)
         );
     }
 
@@ -3499,6 +3831,7 @@ mod tests {
         assert!(update.saved_to_csv);
         assert_eq!(update.historical_order_id.as_deref(), Some("O001"));
         assert!(!duplicate_update.saved_to_csv);
+        assert_eq!(state.learning_timeline().event_count, 1);
         assert!(admin.live_orders.is_empty());
         assert_eq!(admin.completed_session_orders.len(), 1);
         assert_eq!(
@@ -3685,5 +4018,74 @@ mod tests {
                 .any(|row| row.method == "After (selected preferences)")
         );
         assert!(result.conclusion.contains("excluded"));
+    }
+
+    #[test]
+    fn advanced_scenarios_do_not_mutate_history_or_timeline() {
+        let dishes = vec![
+            dish("D01", "Rice Bowl", "main", &["rice"], &["local"]),
+            dish("D02", "Chicken Satay", "side", &["chicken"], &["grilled"]),
+            dish("D03", "Banana", "dessert", &["banana"], &["sweet"]),
+        ];
+        let orders = vec![Order {
+            order_id: "O001".to_string(),
+            session_user_id: "U01".to_string(),
+            ordered_dishes: vec!["D01".to_string(), "D02".to_string()],
+            timestamp: "2026-01-01 12:00".to_string(),
+        }];
+        let state = WebState::new(dishes, orders);
+        let history_before = state.combined_orders();
+
+        let comparison = state
+            .counterfactual(CounterfactualRequest {
+                baseline: RecommendationRequest::default(),
+                changes: CounterfactualChanges {
+                    add_liked_ingredients: vec!["rice".to_string()],
+                    simulated_coorders: vec![
+                        crate::recommender::counterfactual::SimulatedCoOrderChange {
+                            anchor_dish_id: "D01".to_string(),
+                            candidate_dish_id: "D03".to_string(),
+                            additional_order_count: 10,
+                        },
+                    ],
+                    ..Default::default()
+                },
+                top_k: 3,
+            })
+            .unwrap();
+
+        assert!(!comparison.rank_changes.is_empty());
+        assert_eq!(state.combined_orders().len(), history_before.len());
+        assert_eq!(state.learning_timeline().event_count, 0);
+    }
+
+    #[test]
+    fn meal_sets_use_available_dishes_and_exact_budget_cents() {
+        let dishes = vec![
+            dish("D01", "Rice Bowl", "main", &["rice"], &["local"]),
+            dish("D02", "Chicken Satay", "side", &["chicken"], &["grilled"]),
+            dish("D03", "Banana", "dessert", &["banana"], &["sweet"]),
+        ];
+        let state = WebState::new(dishes, Vec::new());
+        state.set_dish_availability("D02", false).unwrap();
+
+        let sets = state
+            .recommend_meal_sets(MealSetRequest {
+                budget_cents: 5_000,
+                party_size: 1,
+                target_dish_count: Some(2),
+                top_set_count: Some(1),
+                liked_ingredients: vec![],
+                disliked_ingredients: vec![],
+                preferred_tags: vec![],
+                required_categories: vec![],
+                selected_dish_ids: vec![],
+                time_context: None,
+                diversity_mode: Some("balanced".to_string()),
+            })
+            .unwrap();
+
+        assert!(sets[0].total_price_cents <= 5_000);
+        assert!(sets[0].dishes.iter().all(|dish| dish.dish_id != "D02"));
     }
 }

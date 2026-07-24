@@ -639,7 +639,7 @@ impl<T> ApiResponse<T>
 where
     T: Serialize,
 {
-    fn ok(message: impl Into<String>, data: Option<T>) -> Self {
+    pub(crate) fn ok(message: impl Into<String>, data: Option<T>) -> Self {
         Self {
             ok: true,
             message: message.into(),
@@ -647,7 +647,7 @@ where
         }
     }
 
-    fn error(message: impl Into<String>) -> Self {
+    pub(crate) fn error(message: impl Into<String>) -> Self {
         Self {
             ok: false,
             message: message.into(),

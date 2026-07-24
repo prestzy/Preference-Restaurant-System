@@ -43,13 +43,22 @@ Recommendation logic only:
 - `association_metrics.rs`: support, confidence, and lift for co-ordering.
 - `popularity.rs`: historical order frequency fallback scoring.
 - `time_context.rs`: simple breakfast/lunch/dinner/snack rule boost.
-- `hybrid.rs`: hybrid scoring and recommendation ranking.
+- `adaptive.rs`: request-level evidence maturity, adaptive production weights,
+  validation, score combination, and exact 100% display rounding.
+- `evidence.rs`: candidate evidence counts, confidence bands, primary evidence
+  source, weighted evidence contributions, and notes.
+- `explanation.rs`: production explanation wording based on actual calculated
+  weights and evidence.
+- `hybrid.rs`: one request-scoped scoring pipeline and deterministic ranking.
+- `similarity.rs`: reusable weighted dish-feature similarity.
+- `diversity_reranker.rs`: Familiar/Balanced/Discover production reranking and list metrics.
+- `meal_set.rs`: bounded deterministic meal-set optimization.
+- `learning_timeline.rs`: pure before/after evidence-event generation and deterministic rebuild.
+- `counterfactual.rs`: side-effect-free production scenario comparison.
 
-Hybrid scoring uses:
-
-```text
-0.45 content + 0.25 co-order + 0.20 popularity + 0.10 time/business
-```
+Production Hybrid mode uses adaptive weights. Content-only and co-order-only
+ranking remain available, while the Experiment Lab independently reranks with
+fixed `1.0/0.0`, `0.0/1.0`, and `0.4/0.6` controlled weights.
 
 The web layer passes cleaned `UserPreference` values into these modules. The recommender does not know about HTML, images, routes, or cart rendering.
 
@@ -63,6 +72,8 @@ Web-facing application state:
 - Converts domain models into frontend-friendly view models.
 - Resolves local dish image URLs.
 - Builds recommendation API responses with detailed explanations.
+- Exposes meal-set and counterfactual services using cloned request data.
+- Adds timeline events only after durable order completion.
 
 ### `web/routes.rs`
 
@@ -77,6 +88,7 @@ Focused request handlers:
 - `orders.rs`: customer orders page.
 - `admin.rs`: admin dashboard, order status updates, and dish management.
 - `recommendations.rs`: recommendation API bridge.
+- `advanced_recommendations.rs`: meal-set, protected timeline, and protected counterfactual API adapters.
 
 ### `web/templates.rs`
 
@@ -116,7 +128,9 @@ This separation keeps the FYP prototype explainable and easier to extend.
 - Admin dish changes are in memory for the running server session.
 - Admin CSV export downloads the current in-memory state.
 - Checkout creates live in-memory orders.
-- Completed checkout orders are appended immediately to the in-memory historical order log and included as session co-order evidence.
+- Completed checkout orders are appended to `data/orders.csv`, added immediately to in-memory history, and included in future recommendation evidence.
+- Privacy-safe learning events are persisted separately in `data/recommendation_learning_events.jsonl`.
+- Timeline failure does not roll back a durable completed order; authenticated rebuild replays historical orders.
 - Historical order CSV import/reload replaces historical logs in memory and immediately affects collaborative/hybrid recommendation results.
 
 This is deliberate for a prototype: it demonstrates the workflow without adding database complexity.

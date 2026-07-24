@@ -1,6 +1,14 @@
+pub mod adaptive;
 pub mod association_metrics;
 pub mod collaborative_filter;
+pub mod counterfactual;
+pub mod diversity_reranker;
+pub mod evidence;
+pub mod explanation;
 pub mod hybrid;
 pub mod ingredient_filter;
+pub mod learning_timeline;
+pub mod meal_set;
 pub mod popularity;
+pub mod similarity;
 pub mod time_context;

@@ -54,6 +54,10 @@ pub fn router(state: WebState) -> Router {
             post(handlers::recommendations::recommendations),
         )
         .route(
+            "/api/recommendations/meal-set",
+            post(handlers::advanced_recommendations::meal_sets),
+        )
+        .route(
             "/api/assistant/recommendations",
             post(handlers::assistant::smart_menu_assistant),
         )
@@ -68,6 +72,18 @@ pub fn router(state: WebState) -> Router {
         .route(
             "/api/admin/experiment-lab",
             post(handlers::admin::run_experiment_lab),
+        )
+        .route(
+            "/api/admin/recommendations/counterfactual",
+            post(handlers::advanced_recommendations::counterfactual),
+        )
+        .route(
+            "/api/admin/recommendations/learning-timeline",
+            get(handlers::advanced_recommendations::learning_timeline),
+        )
+        .route(
+            "/api/admin/recommendations/learning-timeline/rebuild",
+            post(handlers::advanced_recommendations::rebuild_learning_timeline),
         )
         .route("/api/admin/orders", get(handlers::admin::admin_orders_sync))
         .route(

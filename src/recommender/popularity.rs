@@ -1,11 +1,11 @@
 use crate::models::Order;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Dish popularity counts derived from historical/completed order baskets.
 ///
-/// This is intentionally simple: every appearance of a dish ID in an order log
-/// adds one count. It gives the recommender a fallback signal when the customer
-/// has not selected preferences or a cart context yet.
+/// This is intentionally simple: every basket containing a dish adds one count.
+/// Duplicate dish IDs inside one basket are ignored because evidence maturity
+/// represents independent order baskets, not item quantity.
 pub type PopularityCounts = HashMap<String, u32>;
 
 /// Builds per-dish order frequency counts.
@@ -13,11 +13,14 @@ pub fn build_popularity_counts(orders: &[Order]) -> PopularityCounts {
     let mut counts = PopularityCounts::new();
 
     for order in orders {
-        for dish_id in &order.ordered_dishes {
-            let normalized = dish_id.trim().to_uppercase();
-            if !normalized.is_empty() {
-                *counts.entry(normalized).or_default() += 1;
-            }
+        let unique_dishes = order
+            .ordered_dishes
+            .iter()
+            .map(|dish_id| dish_id.trim().to_uppercase())
+            .filter(|dish_id| !dish_id.is_empty())
+            .collect::<HashSet<_>>();
+        for dish_id in unique_dishes {
+            *counts.entry(dish_id).or_default() += 1;
         }
     }
 

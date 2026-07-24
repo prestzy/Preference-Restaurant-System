@@ -13,6 +13,8 @@ The project direction is now QR-based ordering: customers scan a QR code with th
 - Smart Search by dish name, dish ID, ingredient, category, tag, alias, and curated food concept, with live suggestions and match reasons.
 - Local dish image support with a graceful placeholder.
 - “Recommended for You” cards powered by Rust recommendation logic.
+- Familiar, Balanced, and Discover modes with a relevance-protected diversity reranker.
+- Budget-aware meal-set builder using exact integer-cent constraints.
 - Preference chips generated from the CSV dataset:
   - liked ingredients
   - disliked ingredients
@@ -32,8 +34,10 @@ The project direction is now QR-based ordering: customers scan a QR code with th
 - Recommendation Tester includes controlled in-memory random co-order simulation for limited-data demonstrations.
 - Simulation data does not modify `data/orders.csv`.
 - Recommendation Experiment Lab contains three controlled experiments: Ingredient Impact, Co-Order Impact, and Method Comparison.
+- Admin Counterfactual Explorer compares temporary preference/co-order scenarios without changing production data.
+- “How the Recommender Learned” timeline records factual evidence deltas from real completed orders in a separate JSON Lines file.
 - Stakeholder instructions are available in `docs/recommendation-experiment-lab-manual.md`.
-- CSV-based data loading, import, and export.
+- CSV-based startup loading and historical completed-order persistence.
 - Popularity fallback so recommendations do not go empty when preference input is limited.
 - Association-rule metrics for co-ordering: support, confidence, and lift.
 - Simple time-context boost for breakfast, lunch, dinner, and snack/dessert testing.
@@ -108,6 +112,7 @@ data/dishes.csv
 data/orders.csv
 data/order_details.csv
 data/search_aliases.csv
+data/recommendation_learning_events.jsonl
 ```
 
 `data/orders.csv` remains recommendation-history only:
@@ -125,6 +130,7 @@ Data roles:
 - `data/recommendation_feedback.csv`, when present, is archived legacy prototype data. The current application does not load, update, or evaluate it.
 - In-memory simulation orders: generated only inside Recommendation Tester and never appended to real history.
 - `data/search_aliases.csv`: maintainable food-domain search aliases such as `mee -> noodle`, `ayam -> chicken`, and `pisang -> banana`.
+- `data/recommendation_learning_events.jsonl`: privacy-safe explanatory events keyed by durable historical order ID.
 
 ## Smart Search
 
@@ -175,21 +181,40 @@ The recommender stays lightweight and explainable:
 - Popularity fallback uses historical/completed order frequency.
 - Association metrics calculate support, confidence, and lift for selected dish to candidate dish.
 - Time-context rules add a small explainable business boost.
-- Hybrid scoring uses:
-
-```text
-0.45 content + 0.25 co-order + 0.20 popularity + 0.10 time/business
-```
-
-- Result cards and the admin recommendation tester show score breakdowns, association metrics, and plain-language explanations.
+- Production Hybrid ranking uses **Data-Aware Adaptive Weights**. It measures
+  global order maturity, selected-context frequency, and strongest pair count,
+  then changes content, co-order, popularity, and time/context influence for
+  four situations: preferences with context, preferences without context,
+  context without preferences, and no input.
+- Collaborative confidence is
+  `0.20 × dataset strength + 0.35 × context strength + 0.45 × pair strength`.
+  It is forced to zero when no selected context or observed pair exists.
+- Central heuristic saturation targets are 50 total orders, 10 context orders,
+  5 pair co-orders, and 10 candidate appearances.
+- Every result includes a Recommendation Confidence and Evidence Meter:
+  Insufficient (`<0.15`), Low (`<0.40`), Medium (`<0.70`), or High.
+- Recommendation score controls ranking. Evidence confidence measures support
+  from explicit preferences and historical/context evidence; it is not a
+  probability that the customer will like the dish.
+- New dishes remain eligible through metadata matches even when popularity and
+  co-order evidence are absent.
+- Result cards and the Adaptive Scoring Inspector show actual adaptive weights,
+  evidence counts, association metrics, and plain-language explanations.
 - The Smart Menu Assistant is rule-based and is now merged with the main customer search input. It only extracts ingredients, tags, categories, and dish names that exist in the loaded menu vocabulary. No external LLM API is required.
 - Recommendation Experiment Lab:
   - Ingredient Impact shows how liked/disliked ingredients alter ingredient scores and exclusions.
   - Co-Order Impact adds temporary in-memory co-orders to show pair-count/ranking sensitivity.
   - Method Comparison compares controlled experiment settings: Ingredient-only `1.0/0.0`, Co-order-only `0.0/1.0`, and Hybrid `0.4/0.6`.
-- Production customer ranking remains `0.45 content + 0.25 co-order + 0.20 popularity + 0.10 time/business`.
+- Experiment Lab methods remain controlled fixed-weight comparisons and do not
+  use or mutate production adaptive weights.
 
-No heavy machine learning libraries are used.
+No external ML/LLM API, heavy recommendation library, or nondeterministic
+training process is used. See
+[docs/adaptive-recommendation.md](docs/adaptive-recommendation.md) for formulas,
+worked examples, limitations, and stakeholder demonstration guidance. See
+[docs/advanced-recommendation-features.md](docs/advanced-recommendation-features.md)
+for meal-set optimization, diversity formulas, learning timeline lifecycle,
+counterfactual comparison, API details, and limitations.
 
 ## Project Structure
 
@@ -197,7 +222,7 @@ No heavy machine learning libraries are used.
 - `src/data_loader.rs`: CSV loading/import/export helpers.
 - `src/persistence/`: operational order-detail CSV persistence.
 - `src/agent/`: rule-based Smart Menu Assistant preference parser.
-- `src/recommender/`: content, collaborative, association metrics, popularity, time context, and hybrid recommendation logic.
+- `src/recommender/`: content, collaborative, association metrics, popularity, time context, adaptive weights, candidate evidence, explanations, and hybrid ranking.
 - `src/web/state.rs`: shared web state and view-model preparation.
 - `src/web/routes.rs`: Axum route declarations.
 - `src/web/handlers/`: focused HTTP handlers for menu, cart, orders, admin, assistant, and recommendations.
@@ -224,4 +249,10 @@ Tests cover CSV parsing/validation, persistent completed-order append, operation
 - Customer identity is temporary, stored in server memory plus an HTTP-only session cookie, and intended only for order operations.
 - Refreshing keeps the session while the server is running; restarting the server clears active customer sessions but keeps persisted order details.
 - Recommendation data is limited to the CSV dataset and completed prototype orders.
+- Adaptive saturation thresholds and confidence bands are heuristic settings,
+  not learned or statistically calibrated parameters.
+- Evidence confidence is not a satisfaction probability, and co-order patterns
+  represent basket relationships rather than causal customer preference.
+- Popularity fallback may reinforce already-popular dishes; larger-scale
+  validation and stakeholder testing are still required.
 - Evaluation metrics are controlled system/proxy metrics and do not claim commercial recommendation accuracy.

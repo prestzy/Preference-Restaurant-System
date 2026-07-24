@@ -49,6 +49,53 @@ function formatList(values) {
   return values && values.length ? values.join(", ") : "-";
 }
 
+function evidenceLabel(level) {
+  return {
+    insufficient: "Limited evidence",
+    low: "Low evidence",
+    medium: "Medium evidence",
+    high: "High evidence",
+  }[level] || "Limited evidence";
+}
+
+function evidenceSourceLabel(source) {
+  return {
+    content_preference: "Content preference",
+    co_ordering: "Co-ordering",
+    popularity: "Popularity",
+    time_context: "Time/context",
+    mixed: "Mixed evidence",
+    none: "Limited fallback evidence",
+  }[source] || "Limited fallback evidence";
+}
+
+function adaptivePercentages(weights = {}) {
+  const values = [
+    Number(weights.content || 0),
+    Number(weights.co_order || 0),
+    Number(weights.popularity || 0),
+    Number(weights.time_context || 0),
+  ];
+  const rounded = values.map((value) => Math.round(value * 100));
+  const largest = values.indexOf(Math.max(...values));
+  rounded[largest < 0 ? 0 : largest] += 100 - rounded.reduce((sum, value) => sum + value, 0);
+  return rounded;
+}
+
+function evidenceSummaryHtml(recommendation) {
+  const evidence = recommendation?.evidence || {};
+  const level = evidence.confidence_level || "insufficient";
+  const percent = Math.max(0, Math.min(100, Math.round(Number(evidence.overall_confidence || 0) * 100)));
+  return `
+    <div class="evidence-summary">
+      <span class="evidence-badge evidence-${escapeHtml(level)}">${escapeHtml(evidenceLabel(level))}</span>
+      <span class="evidence-meter" role="meter" aria-label="Recommendation evidence confidence" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}">
+        <span style="width:${percent}%"></span>
+      </span>
+    </div>
+  `;
+}
+
 function dishById(dishId) {
   return (window.MENU_DISHES || []).find((dish) => dish.dish_id === dishId);
 }
@@ -433,6 +480,8 @@ function collectPreferences(scope) {
 
   if (scope === "customer") {
     preferences.selected_dish_ids = Object.keys(readCart());
+    preferences.diversity_mode =
+      document.querySelector("[data-diversity-mode].active")?.dataset.diversityMode || "balanced";
   } else {
     preferences.selected_dish_ids = Array.from(
       document.querySelectorAll("[data-admin-context-dish]:checked")
@@ -443,6 +492,17 @@ function collectPreferences(scope) {
   }
 
   return preferences;
+}
+
+function setupDiversitySelector() {
+  document.querySelectorAll("[data-diversity-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll("[data-diversity-mode]").forEach((item) => {
+        item.classList.toggle("active", item === button);
+      });
+      refreshCustomerRecommendations();
+    });
+  });
 }
 
 function setupPreferencePanels() {
@@ -529,6 +589,7 @@ function renderRecommendationCard(recommendation) {
       <div class="card-body">
         <h3>${escapeHtml(dish.name)}</h3>
         <p>${escapeHtml(dish.category)}</p>
+        ${evidenceSummaryHtml(recommendation)}
         <span class="reason">${escapeHtml(shortRecommendationReason(recommendation))}</span>
         <strong>${escapeHtml(dish.price)}</strong>
         <div class="card-actions">
@@ -596,6 +657,11 @@ function showDishDetail(dishId) {
   }
 
   const recommendation = recommendationByDishId(dishId);
+  const evidence = recommendation?.evidence;
+  const weights = adaptivePercentages(recommendation?.adaptive_weights);
+  const evidenceNotes = (evidence?.evidence_notes || [])
+    .map((note) => `<li>${escapeHtml(note)}</li>`)
+    .join("");
   content.innerHTML = `
     <div class="detail-layout">
       ${imageHtml(dish, "large")}
@@ -607,13 +673,33 @@ function showDishDetail(dishId) {
         <p><strong>Price:</strong> ${escapeHtml(dish.price)}</p>
         ${
           recommendation
-            ? `<div class="reason-box">
-                <strong>Why recommended?</strong>
+            ? `<div class="reason-box evidence-detail">
+                <strong>Why this dish was recommended</strong>
                 <p>${escapeHtml(recommendation.explanation)}</p>
+                <h3>Recommendation score</h3>
+                <p><strong>Adaptive hybrid score:</strong> ${recommendation.hybrid_score.toFixed(2)}</p>
+                <p><strong>Base rank / reranked rank:</strong> ${recommendation.base_rank || "-"} / ${recommendation.reranked_rank || "-"}</p>
+                <p><strong>Diversity-adjusted score:</strong> ${Number(recommendation.reranked_score || 0).toFixed(2)}</p>
+                <ul class="evidence-note-list">${(recommendation.diversity_notes || []).map((note) => `<li>${escapeHtml(note)}</li>`).join("")}</ul>
+                <h3>Evidence confidence</h3>
+                ${evidenceSummaryHtml(recommendation)}
+                <p><strong>${escapeHtml(evidenceLabel(evidence?.confidence_level))} — ${Math.round(Number(evidence?.overall_confidence || 0) * 100)}%</strong></p>
+                <p class="confidence-disclaimer">This is the strength of the available recommendation evidence, not the probability that you will like the dish.</p>
+                <h3>Adaptive weights used</h3>
+                <div class="weight-breakdown">
+                  ${weightBar("Content preference", weights[0])}
+                  ${weightBar("Co-ordering", weights[1])}
+                  ${weightBar("Popularity", weights[2])}
+                  ${weightBar("Time/context", weights[3])}
+                </div>
+                <h3>Evidence breakdown</h3>
+                <ul class="evidence-note-list">${evidenceNotes || "<li>Evidence is currently limited.</li>"}</ul>
+                <p><strong>Primary source:</strong> ${escapeHtml(evidenceSourceLabel(evidence?.primary_evidence_source))}</p>
                 <details>
                   <summary>Technical score breakdown</summary>
                   <p>Content ${recommendation.content_score.toFixed(2)} · Co-order ${recommendation.co_order_score.toFixed(2)} · Popularity ${recommendation.popularity_score.toFixed(2)} · Time ${recommendation.business_rule_score.toFixed(2)} · Hybrid ${recommendation.hybrid_score.toFixed(2)}</p>
-                  <p>Support ${recommendation.association_support.toFixed(2)} · Confidence ${recommendation.association_confidence.toFixed(2)} · Lift ${recommendation.association_lift.toFixed(2)}</p>
+                  <p>Pair count ${recommendation.association_pair_count} · Context orders ${evidence?.selected_context_order_count || 0} · Candidate popularity ${evidence?.candidate_popularity_count || 0}</p>
+                  <p>Support ${recommendation.association_support.toFixed(2)} · Association confidence ${recommendation.association_confidence.toFixed(2)} · Lift ${recommendation.association_lift.toFixed(2)}</p>
                 </details>
               </div>`
             : ""
@@ -629,6 +715,96 @@ function showDishDetail(dishId) {
   } else {
     dialog.setAttribute("open", "open");
   }
+}
+
+function setupMealSetBuilder() {
+  const button = document.getElementById("build-meal-set");
+  const status = document.getElementById("meal-set-status");
+  const target = document.getElementById("meal-set-results");
+  if (!button || !status || !target) return;
+
+  button.addEventListener("click", async () => {
+    const preferences = collectPreferences("customer");
+    const budget = Number(document.getElementById("meal-budget")?.value || 0);
+    const targetCount = Number(document.getElementById("meal-target-count")?.value || 0);
+    const payload = {
+      ...preferences,
+      budget_cents: Math.round(budget * 100),
+      party_size: Number(document.getElementById("meal-party-size")?.value || 0),
+      target_dish_count: targetCount > 0 ? targetCount : null,
+      top_set_count: Number(document.getElementById("meal-set-count")?.value || 3),
+      required_categories: Array.from(
+        document.querySelectorAll("[data-meal-category]:checked")
+      ).map((input) => input.value),
+    };
+    button.disabled = true;
+    status.textContent = "Building meal sets...";
+    target.innerHTML = "";
+    try {
+      const response = await fetch("/api/recommendations/meal-set", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!result.ok) throw new Error(result.message || "Unable to build a meal set.");
+      status.textContent = result.message;
+      target.innerHTML = (result.data || []).map(renderMealSet).join("");
+      target.querySelectorAll("[data-add-meal-set]").forEach((addButton) => {
+        addButton.addEventListener("click", () => {
+          const ids = JSON.parse(addButton.dataset.addMealSet || "[]");
+          const cart = readCart();
+          ids.forEach((id) => {
+            cart[id] = Math.max(1, Number(cart[id] || 0));
+          });
+          writeCart(cart);
+          addButton.textContent = "Added to Cart";
+        });
+      });
+    } catch (error) {
+      status.textContent = error.message || "Unable to build a meal set.";
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
+function renderMealSet(set, index) {
+  const dishes = (set.dishes || [])
+    .map(
+      (dish) => `<li><strong>${escapeHtml(dish.name)}</strong> <span>${escapeHtml(dish.dish_id)} · ${escapeHtml(dish.price)}</span></li>`
+    )
+    .join("");
+  const notes = (set.explanation_notes || [])
+    .map((note) => `<li>${escapeHtml(note)}</li>`)
+    .join("");
+  const ids = JSON.stringify((set.dishes || []).map((dish) => dish.dish_id));
+  return `
+    <article class="meal-set-card">
+      <div class="section-heading"><div><h3>Set ${index + 1}</h3><p>${escapeHtml((set.represented_categories || []).join(" · "))}</p></div><strong>RM ${(Number(set.total_price_cents || 0) / 100).toFixed(2)}</strong></div>
+      <ul class="meal-dish-list">${dishes}</ul>
+      <div class="meal-score-grid">
+        <span>Set score <strong>${Number(set.final_set_score || 0).toFixed(2)}</strong></span>
+        <span>Preference coverage <strong>${Math.round(Number(set.preference_coverage || 0) * 100)}%</strong></span>
+        <span>Category coverage <strong>${Math.round(Number(set.category_coverage || 0) * 100)}%</strong></span>
+        <span>Pair compatibility <strong>${Math.round(Number(set.pair_compatibility || 0) * 100)}%</strong></span>
+        <span>Set diversity <strong>${Math.round(Number(set.set_diversity || 0) * 100)}%</strong></span>
+        <span>Budget remaining <strong>RM ${(Number(set.remaining_budget_cents || 0) / 100).toFixed(2)}</strong></span>
+      </div>
+      <details><summary>Why this set?</summary><ul>${notes}</ul></details>
+      <button class="primary-action" type="button" data-add-meal-set='${escapeHtml(ids)}'>Add Entire Set</button>
+    </article>
+  `;
+}
+
+function weightBar(label, percent) {
+  return `
+    <div class="weight-row">
+      <span>${escapeHtml(label)}</span>
+      <span class="weight-track" aria-hidden="true"><span style="width:${percent}%"></span></span>
+      <strong>${percent}%</strong>
+    </div>
+  `;
 }
 
 function closeDishDetail() {
@@ -829,9 +1005,304 @@ function setupAdminTools() {
   setupAdminOrderPolling();
   setupDishManagement();
   setupCsvTools();
+  setupAdaptiveInspector();
+  setupCounterfactualExplorer();
+  setupLearningTimeline();
   setupAdminRecommendationTester();
   setupAdminInsights();
   setupSimulationTester();
+}
+
+function setupAdaptiveInspector() {
+  const runButton = document.getElementById("run-adaptive-inspector");
+  const resetButton = document.getElementById("reset-adaptive-inspector");
+  const target = document.getElementById("adaptive-inspector-results");
+  if (!runButton || !target) return;
+
+  const values = (id) =>
+    Array.from(document.getElementById(id)?.selectedOptions || []).map((option) => option.value);
+
+  runButton.addEventListener("click", async () => {
+    runButton.disabled = true;
+    target.innerHTML = `<div class="info-card slim"><strong>Calculating adaptive evidence...</strong></div>`;
+    try {
+      const result = await requestRecommendations({
+        liked_ingredients: values("adaptive-liked"),
+        disliked_ingredients: values("adaptive-disliked"),
+        preferred_tags: values("adaptive-tags"),
+        selected_dish_ids: values("adaptive-context"),
+        time_context: document.getElementById("adaptive-time")?.value || "Any",
+        ranking_method: "hybrid",
+      });
+      renderAdaptiveInspector(result, target);
+    } catch {
+      target.innerHTML = `<div class="info-card slim error"><strong>Unable to calculate adaptive scoring.</strong></div>`;
+    } finally {
+      runButton.disabled = false;
+    }
+  });
+
+  resetButton?.addEventListener("click", () => {
+    ["adaptive-liked", "adaptive-disliked", "adaptive-tags", "adaptive-context"].forEach((id) => {
+      Array.from(document.getElementById(id)?.options || []).forEach((option) => {
+        option.selected = false;
+      });
+    });
+    const time = document.getElementById("adaptive-time");
+    if (time) time.value = "Any";
+    target.innerHTML = "";
+  });
+}
+
+function renderAdaptiveInspector(result, target) {
+  const profile = result.evidence_profile || {};
+  const config = result.scoring_config || {};
+  const weights = adaptivePercentages(result.adaptive_weights);
+  const collaborative = Number(profile.collaborative_confidence || 0);
+  const dataNote =
+    collaborative < 0.4
+      ? "Collaborative evidence is limited, so the system currently gives more weight to explicit ingredient preferences or popularity."
+      : "Enough co-order evidence is available for collaborative filtering to receive greater weight.";
+  const rows = (result.recommendations || [])
+    .map((item, index) => {
+      const evidence = item.evidence || {};
+      const notes = (evidence.evidence_notes || [])
+        .map((note) => `<li>${escapeHtml(note)}</li>`)
+        .join("");
+      const itemWeights = adaptivePercentages(item.adaptive_weights);
+      return `
+        <tr>
+          <td data-label="Base rank">${item.base_rank || index + 1}</td>
+          <td data-label="Reranked">${item.reranked_rank || index + 1}</td>
+          <td data-label="Dish"><strong>${escapeHtml(item.dish.name)}</strong><span>${escapeHtml(item.dish.dish_id)}</span></td>
+          <td data-label="Base / reranked">${Number(item.base_score).toFixed(2)} / ${Number(item.reranked_score).toFixed(2)}</td>
+          <td data-label="Diversity">Novelty ${Number(item.novelty_score).toFixed(2)} · Similarity ${Number(item.max_similarity).toFixed(2)} · Category ${Number(item.category_bonus).toFixed(2)}</td>
+          <td data-label="Confidence"><span class="evidence-badge evidence-${escapeHtml(evidence.confidence_level || "insufficient")}">${escapeHtml(evidenceLabel(evidence.confidence_level))}</span><span>${Math.round(Number(evidence.overall_confidence || 0) * 100)}%</span></td>
+          <td data-label="Primary evidence">${escapeHtml(evidenceSourceLabel(evidence.primary_evidence_source))}</td>
+          <td data-label="Adaptive weights">${itemWeights[0]}/${itemWeights[1]}/${itemWeights[2]}/${itemWeights[3]}%</td>
+          <td data-label="Evidence details">
+            <details>
+              <summary>View evidence</summary>
+              <p>Scores: content ${Number(item.content_score).toFixed(2)}, co-order ${Number(item.co_order_score).toFixed(2)}, popularity ${Number(item.popularity_score).toFixed(2)}, time ${Number(item.business_rule_score).toFixed(2)}</p>
+              <p>Contributions: content ${Number(evidence.contributions?.content || 0).toFixed(2)}, co-order ${Number(evidence.contributions?.co_order || 0).toFixed(2)}, popularity ${Number(evidence.contributions?.popularity || 0).toFixed(2)}, time ${Number(evidence.contributions?.time_context || 0).toFixed(2)}</p>
+              <p>Pair count ${evidence.candidate_pair_count || 0}; candidate appearances ${evidence.candidate_popularity_count || 0}; support ${Number(item.association_support).toFixed(2)}; association confidence ${Number(item.association_confidence).toFixed(2)}; lift ${Number(item.association_lift).toFixed(2)}.</p>
+              <ul>${notes}</ul>
+            </details>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  target.innerHTML = `
+    <div class="info-card slim"><strong>${escapeHtml(dataNote)}</strong><span>This evidence confidence is not a probability of customer satisfaction.</span></div>
+    <p class="muted">Saturation thresholds: ${config.total_order_target || 50} total orders, ${config.context_order_target || 10} context orders, ${config.pair_count_target || 5} pair co-orders, ${config.popularity_count_target || 10} candidate appearances.</p>
+    <div class="adaptive-summary-grid">
+      ${adaptiveMetric("Historical orders", profile.total_order_count || 0)}
+      ${adaptiveMetric("Context orders", profile.selected_context_order_count || 0)}
+      ${adaptiveMetric("Strongest pair", profile.strongest_context_pair_count || 0)}
+      ${adaptiveMetric("Dataset strength", `${Math.round(Number(profile.dataset_strength || 0) * 100)}%`)}
+      ${adaptiveMetric("Context strength", `${Math.round(Number(profile.context_strength || 0) * 100)}%`)}
+      ${adaptiveMetric("Pair strength", `${Math.round(Number(profile.pair_strength || 0) * 100)}%`)}
+      ${adaptiveMetric("Collaborative confidence", `${Math.round(collaborative * 100)}%`)}
+    </div>
+    <div class="admin-card inset-card"><h3>Adaptive weights</h3><div class="weight-breakdown">
+      ${weightBar("Content preference", weights[0])}
+      ${weightBar("Co-ordering", weights[1])}
+      ${weightBar("Popularity", weights[2])}
+      ${weightBar("Time/context", weights[3])}
+    </div></div>
+    <div class="table-wrap"><table class="responsive-data-table adaptive-result-table"><thead><tr><th>Base rank</th><th>Reranked</th><th>Dish</th><th>Base / reranked score</th><th>Diversity evidence</th><th>Confidence</th><th>Primary evidence</th><th>Weights C/CO/P/T</th><th>Details</th></tr></thead><tbody>${rows || "<tr><td colspan='9'>No eligible recommendation results.</td></tr>"}</tbody></table></div>
+  `;
+}
+
+let lastCounterfactualResult = null;
+
+function setupCounterfactualExplorer() {
+  const run = document.getElementById("run-counterfactual");
+  const target = document.getElementById("counterfactual-results");
+  const exportButton = document.getElementById("export-counterfactual");
+  if (!run || !target) return;
+  const values = (id) =>
+    Array.from(document.getElementById(id)?.selectedOptions || []).map((option) => option.value);
+
+  run.addEventListener("click", async () => {
+    const count = Number(document.getElementById("cf-order-count")?.value || 0);
+    const diversity = document.getElementById("cf-diversity")?.value || null;
+    const simulated = count > 0
+      ? [{
+          anchor_dish_id: document.getElementById("cf-anchor")?.value || "",
+          candidate_dish_id: document.getElementById("cf-candidate")?.value || "",
+          additional_order_count: count,
+        }]
+      : [];
+    const payload = {
+      baseline: {
+        liked_ingredients: values("cf-base-liked"),
+        disliked_ingredients: values("cf-base-disliked"),
+        preferred_tags: values("cf-base-tags"),
+        selected_dish_ids: values("cf-base-context"),
+        ranking_method: "hybrid",
+        diversity_mode: "balanced",
+      },
+      changes: {
+        add_liked_ingredients: values("cf-add-liked"),
+        remove_liked_ingredients: values("cf-remove-liked"),
+        add_disliked_ingredients: values("cf-add-disliked"),
+        remove_disliked_ingredients: values("cf-remove-disliked"),
+        add_preferred_tags: values("cf-add-tags"),
+        remove_preferred_tags: values("cf-remove-tags"),
+        add_context_dish_ids: values("cf-add-context"),
+        remove_context_dish_ids: values("cf-remove-context"),
+        simulated_coorders: simulated,
+        diversity_mode: diversity,
+      },
+      top_k: Number(document.getElementById("cf-top-k")?.value || 5),
+    };
+    run.disabled = true;
+    target.innerHTML = `<div class="info-card slim"><strong>Comparing production scenarios...</strong></div>`;
+    try {
+      const response = await fetch("/api/admin/recommendations/counterfactual", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!result.ok) throw new Error(result.message);
+      lastCounterfactualResult = result.data;
+      if (exportButton) exportButton.disabled = false;
+      renderCounterfactual(result.data, target);
+    } catch (error) {
+      target.innerHTML = `<div class="info-card slim error"><strong>${escapeHtml(error.message || "Comparison failed.")}</strong></div>`;
+    } finally {
+      run.disabled = false;
+    }
+  });
+
+  exportButton?.addEventListener("click", () => {
+    if (!lastCounterfactualResult) return;
+    const header = "dish_id,dish_name,classification,baseline_rank,changed_rank,baseline_score,changed_score,baseline_confidence,changed_confidence";
+    const rows = (lastCounterfactualResult.rank_changes || []).map((item) =>
+      [
+        item.dish_id,
+        item.dish_name,
+        item.classification,
+        item.baseline_rank ?? "",
+        item.changed_rank ?? "",
+        item.baseline_score ?? "",
+        item.changed_score ?? "",
+        item.baseline_confidence ?? "",
+        item.changed_confidence ?? "",
+      ].map(csvCell).join(",")
+    );
+    downloadText(
+      `# Temporary counterfactual comparison; production data was not changed.\n${header}\n${rows.join("\n")}`,
+      "counterfactual-comparison.csv",
+      "text/csv"
+    );
+  });
+}
+
+function renderCounterfactual(data, target) {
+  const delta = data.adaptive_weight_change || {};
+  const rows = (data.rank_changes || [])
+    .filter((item) => item.classification !== "unchanged")
+    .slice(0, 30)
+    .map((item) => `<tr>
+      <td data-label="Dish"><strong>${escapeHtml(item.dish_name)}</strong><span>${escapeHtml(item.dish_id)}</span></td>
+      <td data-label="Change">${escapeHtml(item.classification)}</td>
+      <td data-label="Baseline rank">${item.baseline_rank ?? "-"}</td>
+      <td data-label="Changed rank">${item.changed_rank ?? "-"}</td>
+      <td data-label="Score">${item.baseline_score == null ? "-" : Number(item.baseline_score).toFixed(2)} → ${item.changed_score == null ? "-" : Number(item.changed_score).toFixed(2)}</td>
+      <td data-label="Confidence">${item.baseline_confidence == null ? "-" : Math.round(item.baseline_confidence * 100) + "%"} → ${item.changed_confidence == null ? "-" : Math.round(item.changed_confidence * 100) + "%"}</td>
+    </tr>`).join("");
+  const explanation = (data.explanation || []).map((line) => `<li>${escapeHtml(line)}</li>`).join("");
+  target.innerHTML = `
+    <div class="info-card slim"><strong>Temporary comparison only</strong><span>No orders, timeline events, or production preferences were saved.</span></div>
+    <ul>${explanation}</ul>
+    <div class="adaptive-summary-grid">
+      ${adaptiveMetric("Content weight change", signedPercent(delta.content_delta))}
+      ${adaptiveMetric("Co-order weight change", signedPercent(delta.co_order_delta))}
+      ${adaptiveMetric("Popularity change", signedPercent(delta.popularity_delta))}
+      ${adaptiveMetric("Time/context change", signedPercent(delta.time_context_delta))}
+      ${adaptiveMetric("Entered Top-K", (data.entered_top_k || []).length)}
+      ${adaptiveMetric("Left Top-K", (data.left_top_k || []).length)}
+    </div>
+    <div class="table-wrap"><table class="responsive-data-table"><thead><tr><th>Dish</th><th>Change</th><th>Baseline rank</th><th>Changed rank</th><th>Score</th><th>Confidence</th></tr></thead><tbody>${rows || "<tr><td colspan='6'>No rank changed in this scenario.</td></tr>"}</tbody></table></div>
+  `;
+}
+
+function signedPercent(value) {
+  const percent = Math.round(Number(value || 0) * 100);
+  return `${percent > 0 ? "+" : ""}${percent}%`;
+}
+
+function csvCell(value) {
+  return `"${String(value ?? "").replaceAll('"', '""')}"`;
+}
+
+function downloadText(content, filename, type) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function setupLearningTimeline() {
+  const target = document.getElementById("learning-timeline");
+  const status = document.getElementById("learning-timeline-status");
+  const rebuild = document.getElementById("rebuild-learning-timeline");
+  if (!target || !status) return;
+
+  const load = async (rebuildRequested = false) => {
+    status.textContent = rebuildRequested ? "Rebuilding timeline..." : "Loading timeline...";
+    try {
+      const response = await fetch(
+        rebuildRequested
+          ? "/api/admin/recommendations/learning-timeline/rebuild"
+          : "/api/admin/recommendations/learning-timeline",
+        { method: rebuildRequested ? "POST" : "GET" }
+      );
+      const result = await response.json();
+      if (!result.ok) throw new Error(result.message);
+      status.textContent = result.data.warning || `${result.data.event_count} learning event(s).`;
+      target.innerHTML = (result.data.events || []).map(renderLearningEvent).join("") ||
+        `<div class="info-card slim"><strong>No learning events yet</strong><span>Complete a real customer order or rebuild from historical orders.</span></div>`;
+    } catch (error) {
+      status.textContent = error.message || "Unable to load timeline.";
+    }
+  };
+  rebuild?.addEventListener("click", () => {
+    if (window.confirm("Rebuild explanatory events from durable historical orders?")) load(true);
+  });
+  load(false);
+}
+
+function renderLearningEvent(event) {
+  const popularity = (event.popularity_changes || [])
+    .map((item) => `<li>${escapeHtml(item.dish_name)} (${escapeHtml(item.dish_id)}): ${item.before_count} → ${item.after_count}</li>`)
+    .join("");
+  const pairs = (event.pair_changes || [])
+    .slice(0, 5)
+    .map((item) => `<li><strong>${escapeHtml(item.dish_a_name)} + ${escapeHtml(item.dish_b_name)}</strong>: pair ${item.before_count} → ${item.after_count}, confidence ${Number(item.confidence_a_to_b_before).toFixed(2)} → ${Number(item.confidence_a_to_b_after).toFixed(2)}, lift ${Number(item.lift_before).toFixed(2)} → ${Number(item.lift_after).toFixed(2)}</li>`)
+    .join("");
+  const ranks = (event.rank_changes || [])
+    .slice(0, 5)
+    .map((item) => `<li>${escapeHtml(item.candidate_dish_id)} for ${escapeHtml(item.anchor_dish_id)}: ${item.before_rank ?? "-"} → ${item.after_rank ?? "-"}</li>`)
+    .join("");
+  return `
+    <article class="learning-event">
+      <div class="section-heading"><div><h3>Order ${escapeHtml(event.historical_order_id)} completed</h3><p>${escapeHtml(event.completed_at)} · ${escapeHtml((event.dish_ids || []).join(", "))}</p></div><strong>${event.total_orders_before} → ${event.total_orders_after} orders</strong></div>
+      <p>${escapeHtml(event.summary)}</p>
+      <details><summary>Evidence changes</summary><h4>Popularity</h4><ul>${popularity || "<li>-</li>"}</ul><h4>Co-order pairs</h4><ul>${pairs || "<li>-</li>"}</ul><h4>Ranks</h4><ul>${ranks || "<li>-</li>"}</ul></details>
+    </article>
+  `;
+}
+
+function adaptiveMetric(label, value) {
+  return `<div class="metric-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
 }
 
 function setupAdminOrderStatus() {
@@ -1780,6 +2251,8 @@ document.addEventListener("DOMContentLoaded", () => {
   setupCarouselControls();
   setupOrderFilters();
   setupPreferencePanels();
+  setupDiversitySelector();
+  setupMealSetBuilder();
   setupCartButtons();
   setupDetailButtons();
   renderCartPage();

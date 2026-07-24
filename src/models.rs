@@ -129,6 +129,18 @@ pub struct RecommendationResult {
     pub popularity_score: f32,
     pub business_rule_score: f32,
     pub final_score: f32,
+    pub base_score: f32,
+    pub reranked_score: f32,
+    pub base_rank: usize,
+    pub reranked_rank: usize,
+    pub novelty_score: f32,
+    pub max_similarity: f32,
+    pub category_bonus: f32,
+    pub diversity_notes: Vec<String>,
+    /// Request-level production weights used for this candidate's final score.
+    pub adaptive_weights: crate::recommender::adaptive::AdaptiveWeights,
+    /// Candidate evidence strength, deliberately separate from ranking score.
+    pub evidence: crate::recommender::evidence::RecommendationEvidence,
     pub association_base_dish_id: Option<String>,
     pub association_pair_count: u32,
     pub association_support: f32,

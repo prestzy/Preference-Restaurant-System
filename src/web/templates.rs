@@ -13,6 +13,20 @@ pub fn customer_menu_page(view: &MenuView, session: &CustomerSession) -> String 
         .collect::<String>();
     let menu_cards = view.dishes.iter().map(menu_card).collect::<String>();
     let preference_panel = preference_panel(&view.preference_options, "customer");
+    let required_category_options = view
+        .dishes
+        .iter()
+        .map(|dish| dish.category.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .map(|category| {
+            format!(
+                r#"<label class="category-check"><input type="checkbox" value="{}" data-meal-category> {}</label>"#,
+                escape_attr(&category),
+                escape_html(&category)
+            )
+        })
+        .collect::<String>();
     let content = format!(
         r#"
         <section class="search-panel unified-search-panel" aria-label="Search menu and preferences">
@@ -40,10 +54,35 @@ pub fn customer_menu_page(view: &MenuView, session: &CustomerSession) -> String 
                     <button class="carousel-arrow" type="button" data-carousel-scroll="recommended-row" data-direction="1" aria-label="Scroll recommendations right">›</button>
                 </div>
             </div>
+            <div class="diversity-selector" aria-label="Recommendation variety">
+                <span>Variety:</span>
+                <button type="button" data-diversity-mode="familiar">Familiar</button>
+                <button class="active" type="button" data-diversity-mode="balanced">Balanced</button>
+                <button type="button" data-diversity-mode="discover">Discover</button>
+            </div>
             <div class="recommended-row" id="recommended-row">
                 {recommended_cards}
             </div>
             <div class="evaluation-strip" id="recommendation-stats"></div>
+        </section>
+
+        <section class="meal-set-builder" aria-labelledby="meal-set-title">
+            <div class="section-heading">
+                <div><h2 id="meal-set-title">Build a Meal Set</h2><p>Create a relevant set within one exact budget.</p></div>
+            </div>
+            <div class="meal-set-controls">
+                <label>Budget (RM)<input id="meal-budget" type="number" min="1" step="1" value="60" inputmode="numeric"></label>
+                <label>People<input id="meal-party-size" type="number" min="1" max="12" value="2" inputmode="numeric"></label>
+                <label>Dishes (optional)<input id="meal-target-count" type="number" min="1" max="8" placeholder="Auto" inputmode="numeric"></label>
+                <label>Results<select id="meal-set-count"><option>1</option><option selected>3</option><option>5</option></select></label>
+            </div>
+            <details class="meal-category-options">
+                <summary>Required categories</summary>
+                <div class="category-check-row">{required_category_options}</div>
+            </details>
+            <button class="primary-action" id="build-meal-set" type="button">Build Meal Set</button>
+            <p class="status-message" id="meal-set-status" aria-live="polite"></p>
+            <div class="meal-set-results" id="meal-set-results"></div>
         </section>
 
         <section class="menu-section" aria-labelledby="menu-title">
@@ -62,7 +101,8 @@ pub fn customer_menu_page(view: &MenuView, session: &CustomerSession) -> String 
         "#,
         customer_name = escape_html(&session.customer_name),
         dish_count = view.dishes.len(),
-        dish_modal = dish_detail_modal()
+        dish_modal = dish_detail_modal(),
+        required_category_options = required_category_options
     );
 
     page_shell(
@@ -643,6 +683,10 @@ fn recommended_card(recommendation: &RecommendationView) -> String {
             <div class="card-body">
                 <h3>{name}</h3>
                 <p>{category}</p>
+                <div class="evidence-summary">
+                    <span class="evidence-badge evidence-{confidence_class}">{confidence_label}</span>
+                    <span class="evidence-meter" role="meter" aria-label="Recommendation evidence confidence" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{confidence_percent}"><span style="width:{confidence_percent}%"></span></span>
+                </div>
                 <span class="reason">{reason}</span>
                 <strong>{price}</strong>
                 <div class="card-actions">
@@ -656,9 +700,30 @@ fn recommended_card(recommendation: &RecommendationView) -> String {
         dish_id = escape_attr(&dish.dish_id),
         name = escape_html(&dish.name),
         category = escape_html(&dish.category),
+        confidence_class = confidence_class(recommendation),
+        confidence_label = confidence_label(recommendation),
+        confidence_percent = (recommendation.evidence.overall_confidence * 100.0).round() as u8,
         reason = escape_html(&short_recommendation_reason(recommendation)),
         price = escape_html(&dish.price)
     )
+}
+
+fn confidence_class(recommendation: &RecommendationView) -> &'static str {
+    match recommendation.evidence.confidence_level {
+        crate::recommender::evidence::ConfidenceLevel::Insufficient => "insufficient",
+        crate::recommender::evidence::ConfidenceLevel::Low => "low",
+        crate::recommender::evidence::ConfidenceLevel::Medium => "medium",
+        crate::recommender::evidence::ConfidenceLevel::High => "high",
+    }
+}
+
+fn confidence_label(recommendation: &RecommendationView) -> &'static str {
+    match recommendation.evidence.confidence_level {
+        crate::recommender::evidence::ConfidenceLevel::Insufficient => "Limited evidence",
+        crate::recommender::evidence::ConfidenceLevel::Low => "Low evidence",
+        crate::recommender::evidence::ConfidenceLevel::Medium => "Medium evidence",
+        crate::recommender::evidence::ConfidenceLevel::High => "High evidence",
+    }
 }
 
 fn short_recommendation_reason(recommendation: &RecommendationView) -> String {
@@ -1090,11 +1155,100 @@ fn recommendation_tester(admin: &AdminView) -> String {
         experiment_option_list(&admin.preference_options.ingredients, "method-liked");
     let method_disliked_options =
         experiment_option_list(&admin.preference_options.ingredients, "method-disliked");
+    let adaptive_ingredient_options =
+        plain_select_options(&admin.preference_options.ingredients, false);
+    let adaptive_tag_options = plain_select_options(&admin.preference_options.tags, false);
+    let adaptive_dish_options = plain_select_options(
+        &admin
+            .dishes
+            .iter()
+            .map(|dish| format!("{}|{} ({})", dish.dish_id, dish.name, dish.dish_id))
+            .collect::<Vec<_>>(),
+        true,
+    );
 
     format!(
         r#"
+        <section class="admin-card adaptive-inspector">
+            <div class="section-heading">
+                <div><h2>Adaptive Scoring Inspector</h2><p>Inspect the data-aware adaptive weights used by the production customer recommender.</p></div>
+                <span class="method-label">Data-aware adaptive weights</span>
+            </div>
+            <details class="experiment-guide">
+                <summary>What Data-Aware Adaptive Recommendation Does</summary>
+                <p>The system adjusts recommendation weights according to available evidence. With limited co-order data, explicit preferences and popularity receive more influence. As reliable co-order evidence grows, collaborative filtering receives more influence.</p>
+                <h3>How to demonstrate it</h3>
+                <ol><li>Select a rarely ordered context dish and observe low collaborative confidence.</li><li>Select a frequently ordered context dish and compare the weights.</li><li>Complete additional co-orders, rerun, and observe how evidence changes.</li></ol>
+                <h3>What confidence means</h3>
+                <p>The confidence meter represents the strength of evidence supporting a recommendation. It is not a prediction probability and does not guarantee customer satisfaction.</p>
+                <p class="muted">The current prototype thresholds are shown in the inspector result and can be changed centrally in Rust.</p>
+            </details>
+            <div class="adaptive-input-grid">
+                <label class="field-label">Liked ingredients<select id="adaptive-liked" multiple size="5">{adaptive_ingredient_options}</select></label>
+                <label class="field-label">Disliked ingredients<select id="adaptive-disliked" multiple size="5">{adaptive_ingredient_options}</select></label>
+                <label class="field-label">Preferred tags<select id="adaptive-tags" multiple size="5">{adaptive_tag_options}</select></label>
+                <label class="field-label">Selected/context dishes<select id="adaptive-context" multiple size="5">{adaptive_dish_options}</select></label>
+                <label class="field-label compact-control">Time context<select id="adaptive-time"><option>Any</option><option>Breakfast</option><option>Lunch</option><option>Dinner</option><option>Snack</option></select></label>
+            </div>
+            <div class="form-actions">
+                <button class="primary-action" id="run-adaptive-inspector" type="button">Inspect Adaptive Scoring</button>
+                <button class="ghost-action" id="reset-adaptive-inspector" type="button">Reset</button>
+            </div>
+            <div id="adaptive-inspector-results" class="experiment-result" aria-live="polite"></div>
+        </section>
+
+        <section class="admin-card counterfactual-explorer">
+            <div class="section-heading">
+                <div><h2>What Would Change?</h2><p>Compare the exact production pipeline with one temporary alternative scenario.</p></div>
+                <span class="method-label">No production writes</span>
+            </div>
+            <details class="experiment-guide">
+                <summary>Counterfactual Explorer</summary>
+                <p>Baseline and changed rankings use the same adaptive scoring, hard exclusions, and diversity reranker. Temporary co-orders remain in memory for this comparison only.</p>
+            </details>
+            <h3>Baseline</h3>
+            <div class="adaptive-input-grid">
+                <label class="field-label">Liked ingredients<select id="cf-base-liked" multiple size="4">{adaptive_ingredient_options}</select></label>
+                <label class="field-label">Disliked ingredients<select id="cf-base-disliked" multiple size="4">{adaptive_ingredient_options}</select></label>
+                <label class="field-label">Preferred tags<select id="cf-base-tags" multiple size="4">{adaptive_tag_options}</select></label>
+                <label class="field-label">Context dishes<select id="cf-base-context" multiple size="4">{adaptive_dish_options}</select></label>
+            </div>
+            <h3>Temporary change</h3>
+            <div class="adaptive-input-grid">
+                <label class="field-label">Add liked<select id="cf-add-liked" multiple size="4">{adaptive_ingredient_options}</select></label>
+                <label class="field-label">Remove liked<select id="cf-remove-liked" multiple size="4">{adaptive_ingredient_options}</select></label>
+                <label class="field-label">Add disliked<select id="cf-add-disliked" multiple size="4">{adaptive_ingredient_options}</select></label>
+                <label class="field-label">Remove disliked<select id="cf-remove-disliked" multiple size="4">{adaptive_ingredient_options}</select></label>
+                <label class="field-label">Add tags<select id="cf-add-tags" multiple size="4">{adaptive_tag_options}</select></label>
+                <label class="field-label">Remove tags<select id="cf-remove-tags" multiple size="4">{adaptive_tag_options}</select></label>
+                <label class="field-label">Add context<select id="cf-add-context" multiple size="4">{adaptive_dish_options}</select></label>
+                <label class="field-label">Remove context<select id="cf-remove-context" multiple size="4">{adaptive_dish_options}</select></label>
+            </div>
+            <div class="admin-form compact-form">
+                <label class="field-label">Temporary co-order anchor<select id="cf-anchor">{select_options}</select></label>
+                <label class="field-label">Temporary co-order candidate<select id="cf-candidate">{select_options}</select></label>
+                <label class="field-label">Additional baskets<input id="cf-order-count" type="number" min="0" max="100" value="0"></label>
+                <label class="field-label">Changed diversity mode<select id="cf-diversity"><option value="">Keep baseline</option><option value="familiar">Familiar</option><option value="balanced">Balanced</option><option value="discover">Discover</option></select></label>
+                <label class="field-label">Top-K<select id="cf-top-k"><option>3</option><option selected>5</option><option>10</option></select></label>
+            </div>
+            <div class="form-actions">
+                <button class="primary-action" id="run-counterfactual" type="button">Compare Scenarios</button>
+                <button class="ghost-action" id="export-counterfactual" type="button" disabled>Export Comparison CSV</button>
+            </div>
+            <div id="counterfactual-results" class="experiment-result" aria-live="polite"></div>
+        </section>
+
+        <section class="admin-card learning-timeline-panel">
+            <div class="section-heading">
+                <div><h2>How the Recommender Learned</h2><p>Factual evidence changes produced by real completed historical orders.</p></div>
+                <button class="ghost-action" id="rebuild-learning-timeline" type="button">Rebuild Timeline</button>
+            </div>
+            <p class="status-message" id="learning-timeline-status"></p>
+            <div id="learning-timeline" class="learning-timeline" aria-live="polite"></div>
+        </section>
+
         <section class="admin-card experiment-lab">
-            <div class="section-heading"><h2>Recommendation Experiment Lab</h2><p>Run controlled tests without changing production orders or recommendation weights.</p></div>
+            <div class="section-heading"><div><h2>Recommendation Experiment Lab</h2><p>Run controlled tests without changing production orders or recommendation weights.</p></div><span class="method-label">Controlled fixed weights for comparison</span></div>
             <details class="experiment-guide">
                 <summary>How to Use the Experiment Lab</summary>
                 <div class="experiment-guide-grid">
@@ -1171,15 +1325,39 @@ fn recommendation_tester(admin: &AdminView) -> String {
                 <div class="experiment-result" id="experiment-result-method" aria-live="polite"></div>
             </section>
 
-            <div class="reason-box"><strong>Controlled testing only</strong><p>Customer scoring remains unchanged. Co-order simulations use cloned orders in memory and never write to data/orders.csv.</p></div>
+            <div class="reason-box"><strong>Controlled testing only</strong><p>Production customer recommendations use adaptive weights. These experiments keep ingredient-only 1.0/0.0, co-order-only 0.0/1.0, and Hybrid 0.4/0.6 fixed. Simulations use cloned orders and never write to data/orders.csv.</p></div>
         </section>
         "#,
+        adaptive_ingredient_options = adaptive_ingredient_options,
+        adaptive_tag_options = adaptive_tag_options,
+        adaptive_dish_options = adaptive_dish_options,
         select_options = dish_options_for_select(dishes),
         historical_order_options = historical_order_options_for_select(&admin.historical_orders),
         top_k_ingredient = top_k_select("ingredient-top-k"),
         top_k_coorder = top_k_select("coorder-top-k"),
         top_k_method = top_k_select("method-top-k"),
     )
+}
+
+fn plain_select_options(values: &[String], pipe_label: bool) -> String {
+    values
+        .iter()
+        .map(|value| {
+            let (option_value, label) = if pipe_label {
+                value
+                    .split_once('|')
+                    .map(|(id, label)| (id, label))
+                    .unwrap_or((value.as_str(), value.as_str()))
+            } else {
+                (value.as_str(), value.as_str())
+            };
+            format!(
+                r#"<option value="{}">{}</option>"#,
+                escape_attr(option_value),
+                escape_html(&display_option_label(label))
+            )
+        })
+        .collect()
 }
 
 fn experiment_option_list(values: &[String], kind: &str) -> String {

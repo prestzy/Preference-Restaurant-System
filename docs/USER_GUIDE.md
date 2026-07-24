@@ -35,11 +35,22 @@ Customers can:
 - Filter by category chips.
 - Select liked ingredients, disliked ingredients, and preferred tags.
 - View “Recommended for You”.
+- Choose Familiar, Balanced, or Discover recommendation variety.
+- Build a multi-dish set within a selected budget.
 - Open dish details.
 - Add dishes to the cart.
 - Place a prototype order.
 
 The recommendation section updates after preference chips change or cart contents change.
+
+## Build a Meal Set
+
+Use **Build a Meal Set** below recommendations. Enter a budget and party size,
+optionally set a dish count and required categories, then build the set. Active
+preference chips and cart dishes are reused. Every result shows total price,
+remaining budget, preference/category coverage, pair compatibility, diversity,
+and a score explanation. **Add Entire Set** adds each proposed dish once without
+checking out automatically.
 
 ## Live Search Suggestions
 
@@ -190,12 +201,28 @@ The result table shows:
 - matched preferred tags
 - co-order influence
 
-Hybrid scoring uses:
+Production Hybrid scoring uses data-aware adaptive weights. Open a recommended
+dish and select **Why this?** to see:
 
-```text
-0.45 content + 0.25 co-order + 0.20 popularity + 0.10 time/business
-```
+- recommendation score;
+- evidence confidence and evidence-strength label;
+- actual content, co-order, popularity, and time/context weights;
+- preference, pair, context-order, and popularity evidence;
+- support, association confidence, and lift.
+
+The confidence value describes available evidence strength. It is not a
+probability that the customer will like the dish.
 
 Popularity fallback keeps recommendations visible when the customer has not selected preferences or cart context. Association metrics help explain co-ordering evidence for FYP screenshots and Chapter 4 discussion.
 
 This section is useful for FYP demonstration and evaluation discussion.
+
+The Recommendation Tester also provides:
+
+- **Adaptive Scoring Inspector** with base/reranked rank, novelty, similarity,
+  category bonus, confidence, and adaptive weights.
+- **What Would Change?** for temporary preference, context, co-order, and
+  diversity scenarios. It never saves simulated inputs.
+- **How the Recommender Learned**, which shows popularity, association, and rank
+  deltas after real completed orders. Rebuild recovers the explanatory JSON
+  timeline from durable historical orders.

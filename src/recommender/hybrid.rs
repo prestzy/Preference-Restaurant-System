@@ -1,20 +1,23 @@
 use crate::models::{Dish, Order, RecommendationResult, UserPreference};
+use crate::recommender::adaptive::{
+    AdaptiveScoringConfig, AdaptiveWeights, RecommendationEvidenceProfile,
+};
 use crate::recommender::association_metrics::best_association_metric;
 use crate::recommender::collaborative_filter::{
     build_co_order_matrix, calculate_co_order_score, related_selected_dishes,
 };
+use crate::recommender::diversity_reranker::{
+    DiversityMetrics, DiversityMode, DiversityRerankerConfig, rerank_recommendations,
+};
+use crate::recommender::evidence::{CandidateEvidenceInput, calculate_candidate_evidence};
+use crate::recommender::explanation::build_adaptive_explanation;
 use crate::recommender::ingredient_filter::{
-    build_ingredient_explanation, calculate_ingredient_score, check_disliked_ingredients,
-    matched_disliked_ingredients, matched_liked_ingredients, matched_preferred_tags,
+    calculate_ingredient_score, check_disliked_ingredients, matched_disliked_ingredients,
+    matched_liked_ingredients, matched_preferred_tags,
 };
 use crate::recommender::popularity::{build_popularity_counts, calculate_popularity_score};
-use crate::recommender::time_context::{TimeContext, calculate_time_score, time_explanation};
+use crate::recommender::time_context::{TimeContext, calculate_time_score};
 use std::collections::HashSet;
-
-const CONTENT_WEIGHT: f32 = 0.45;
-const CO_ORDER_WEIGHT: f32 = 0.25;
-const POPULARITY_WEIGHT: f32 = 0.20;
-const BUSINESS_RULE_WEIGHT: f32 = 0.10;
 
 /// Summary values displayed in the Evaluation / Prototype Testing section.
 ///
@@ -36,6 +39,31 @@ pub struct RecommendationOutput {
     pub recommendations: Vec<RecommendationResult>,
     #[allow(dead_code)]
     pub stats: RecommendationStats,
+    pub evidence_profile: RecommendationEvidenceProfile,
+    pub adaptive_weights: AdaptiveWeights,
+    pub scoring_config: AdaptiveScoringConfig,
+    pub diversity_mode: DiversityMode,
+    pub diversity_metrics: DiversityMetrics,
+}
+
+/// Runs the production pipeline: base adaptive scoring followed by the
+/// deterministic diversity/discovery reranker.
+pub fn generate_production_recommendations(
+    dishes: &[Dish],
+    orders: &[Order],
+    preference: &UserPreference,
+    diversity_mode: DiversityMode,
+) -> RecommendationOutput {
+    let mut output = generate_recommendations(dishes, orders, preference);
+    let (recommendations, metrics) = rerank_recommendations(
+        output.recommendations,
+        diversity_mode,
+        DiversityRerankerConfig::default(),
+    );
+    output.recommendations = recommendations;
+    output.diversity_mode = diversity_mode;
+    output.diversity_metrics = metrics;
+    output
 }
 
 /// Generates ranked recommendations using content, co-ordering, popularity, and
@@ -57,6 +85,16 @@ pub fn generate_recommendations(
     let popularity_counts = build_popularity_counts(orders);
     let time_context = TimeContext::from_label(preference.time_context.as_deref().unwrap_or("Any"));
     let ranking_method = RankingMethod::from_value(preference.ranking_method.as_deref());
+    let adaptive_config = AdaptiveScoringConfig::default();
+    let evidence_profile = RecommendationEvidenceProfile::build(
+        orders,
+        &co_order_matrix,
+        &preference.selected_dish_ids,
+        preference.has_content_preferences(),
+        time_context != TimeContext::Any,
+        adaptive_config,
+    );
+    let adaptive_weights = AdaptiveWeights::for_profile(&evidence_profile);
     let selected_set: HashSet<String> = preference.selected_dish_ids.iter().cloned().collect();
     let mut recommendations = Vec::new();
     let mut stats = RecommendationStats::default();
@@ -90,13 +128,28 @@ pub fn generate_recommendations(
         );
         let popularity_score = calculate_popularity_score(&popularity_counts, &dish.dish_id);
         let business_rule_score = calculate_time_score(dish, time_context);
+        let evidence = calculate_candidate_evidence(CandidateEvidenceInput {
+            candidate_dish_id: &dish.dish_id,
+            orders,
+            popularity_counts: &popularity_counts,
+            preference,
+            matched_liked_count: matched_liked_ingredients.len(),
+            matched_tag_count: matched_preferred_tags.len(),
+            content_score: ingredient_score,
+            co_order_score,
+            popularity_score,
+            time_context_score: business_rule_score,
+            profile: &evidence_profile,
+            weights: adaptive_weights,
+            config: adaptive_config,
+        });
         let mut final_score = combine_scores(
             ingredient_score,
             co_order_score,
             popularity_score,
             business_rule_score,
             ranking_method,
-            preference.has_content_preferences(),
+            adaptive_weights,
         );
 
         if final_score <= 0.0 {
@@ -125,6 +178,16 @@ pub fn generate_recommendations(
             popularity_score,
             business_rule_score,
             final_score,
+            base_score: final_score,
+            reranked_score: final_score,
+            base_rank: 0,
+            reranked_rank: 0,
+            novelty_score: (1.0 - popularity_score).clamp(0.0, 1.0),
+            max_similarity: 0.0,
+            category_bonus: 0.0,
+            diversity_notes: Vec::new(),
+            adaptive_weights,
+            evidence: evidence.clone(),
             association_base_dish_id: association
                 .as_ref()
                 .map(|metric| metric.base_dish_id.clone()),
@@ -148,7 +211,7 @@ pub fn generate_recommendations(
             matched_preferred_tags,
             matched_disliked_ingredients,
             related_selected_dish_ids,
-            explanation: build_hybrid_explanation(
+            explanation: build_adaptive_explanation(
                 dish,
                 preference,
                 ingredient_score,
@@ -160,6 +223,8 @@ pub fn generate_recommendations(
                     .as_ref()
                     .map(|metric| metric.lift)
                     .unwrap_or(0.0),
+                adaptive_weights,
+                &evidence,
             ),
         });
     }
@@ -180,25 +245,27 @@ pub fn generate_recommendations(
     RecommendationOutput {
         recommendations,
         stats,
+        evidence_profile,
+        adaptive_weights,
+        scoring_config: adaptive_config,
+        diversity_mode: DiversityMode::Balanced,
+        diversity_metrics: DiversityMetrics::default(),
     }
 }
 
 /// Combines all component scores.
 ///
-/// Default hybrid formula:
-/// final = 0.45 content + 0.25 co-order + 0.20 popularity + 0.10 time/business
-///
 /// Admin tester method overrides:
 /// - content-based: content score only
 /// - co-ordering: co-order score, with popularity as fallback
-/// - hybrid: full formula above
+/// - hybrid: data-aware production weights calculated once for the request
 pub fn combine_scores(
     ingredient_score: f32,
     co_order_score: f32,
     popularity_score: f32,
     business_rule_score: f32,
     ranking_method: RankingMethod,
-    has_content_preferences: bool,
+    adaptive_weights: AdaptiveWeights,
 ) -> f32 {
     let score = match ranking_method {
         RankingMethod::ContentBased => ingredient_score,
@@ -209,23 +276,12 @@ pub fn combine_scores(
                 popularity_score * 0.7 + business_rule_score * 0.3
             }
         }
-        RankingMethod::Hybrid => {
-            if has_content_preferences {
-                // When customers choose liked ingredients/tags, content match
-                // should visibly dominate the ordering. Non-matching dishes can
-                // still appear as fallback alternatives, but exact preference
-                // matches are strongly prioritised.
-                0.65 * ingredient_score
-                    + 0.15 * co_order_score
-                    + 0.15 * popularity_score
-                    + 0.05 * business_rule_score
-            } else {
-                CONTENT_WEIGHT * ingredient_score
-                    + CO_ORDER_WEIGHT * co_order_score
-                    + POPULARITY_WEIGHT * popularity_score
-                    + BUSINESS_RULE_WEIGHT * business_rule_score
-            }
-        }
+        RankingMethod::Hybrid => adaptive_weights.combine(
+            ingredient_score,
+            co_order_score,
+            popularity_score,
+            business_rule_score,
+        ),
     };
 
     score.clamp(0.0, 1.0)
@@ -248,60 +304,6 @@ impl RankingMethod {
     }
 }
 
-fn build_hybrid_explanation(
-    dish: &Dish,
-    preference: &UserPreference,
-    ingredient_score: f32,
-    co_order_score: f32,
-    popularity_score: f32,
-    business_rule_score: f32,
-    time_context: TimeContext,
-    association_lift: f32,
-) -> String {
-    let mut reasons = Vec::new();
-
-    if ingredient_score > 0.0 {
-        reasons.push(build_ingredient_explanation(dish, preference));
-    }
-
-    if co_order_score > 0.0 {
-        reasons.push("often appears with the selected/current dish context".to_string());
-    }
-
-    if association_lift > 0.0 {
-        reasons.push(format!("association lift {:.2}", association_lift));
-    }
-
-    if popularity_score > 0.0
-        && !preference.has_content_preferences()
-        && !preference.has_selected_dishes()
-    {
-        reasons.push(
-            "popular dish based on historical orders; used as fallback due to limited preference input"
-                .to_string(),
-        );
-    } else if popularity_score > 0.0 && ingredient_score == 0.0 && co_order_score == 0.0 {
-        reasons.push("popular dish based on historical orders".to_string());
-    }
-
-    if let Some(explanation) = time_explanation(dish, time_context, business_rule_score) {
-        reasons.push(explanation);
-    }
-
-    if reasons.is_empty() {
-        format!(
-            "{} is recommended by the hybrid score formula: 0.45 content + 0.25 co-order + 0.20 popularity + 0.10 time/business.",
-            dish.name
-        )
-    } else {
-        format!(
-            "{} is recommended because it {}. Formula: 0.45 content + 0.25 co-order + 0.20 popularity + 0.10 time/business.",
-            dish.name,
-            reasons.join("; ")
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,17 +321,26 @@ mod tests {
     }
 
     #[test]
-    fn hybrid_formula_uses_all_component_scores() {
-        let score = combine_scores(1.0, 0.5, 0.25, 1.0, RankingMethod::Hybrid, false);
+    fn adaptive_hybrid_uses_request_weights_for_all_component_scores() {
+        let weights = AdaptiveWeights {
+            content: 0.4,
+            co_order: 0.3,
+            popularity: 0.2,
+            time_context: 0.1,
+        };
+        let score = combine_scores(1.0, 0.5, 0.25, 1.0, RankingMethod::Hybrid, weights);
 
-        assert!((score - 0.725).abs() < 0.0001);
+        assert!((score - 0.70).abs() < 0.0001);
     }
 
     #[test]
-    fn content_preferences_receive_stronger_hybrid_weight() {
-        let score = combine_scores(1.0, 0.0, 1.0, 0.0, RankingMethod::Hybrid, true);
+    fn content_only_and_co_order_only_modes_ignore_adaptive_production_weights() {
+        let weights = AdaptiveWeights::default();
+        let content = combine_scores(0.8, 1.0, 1.0, 1.0, RankingMethod::ContentBased, weights);
+        let co_order = combine_scores(0.8, 0.6, 1.0, 1.0, RankingMethod::CoOrdering, weights);
 
-        assert!((score - 0.80).abs() < 0.0001);
+        assert!((content - 0.8).abs() < 0.0001);
+        assert!((co_order - 0.6).abs() < 0.0001);
     }
 
     #[test]
@@ -374,5 +385,147 @@ mod tests {
         assert_eq!(output.stats.filtered_dishes, 2);
         assert_eq!(output.stats.matched_preference_dishes, 1);
         assert_eq!(output.recommendations[0].dish.dish_id, "D01");
+    }
+
+    #[test]
+    fn empty_history_uses_deterministic_fallback_with_insufficient_evidence() {
+        let dishes = vec![dish("D01", "New Dish", "main", &["rice"], &["local"])];
+        let output = generate_recommendations(&dishes, &[], &UserPreference::default());
+        let result = &output.recommendations[0];
+
+        assert_eq!(
+            result.evidence.confidence_level,
+            crate::recommender::evidence::ConfidenceLevel::Insufficient
+        );
+        assert_eq!(result.evidence.overall_confidence, 0.0);
+        assert_eq!(result.final_score, 0.01);
+    }
+
+    #[test]
+    fn new_dish_can_rank_from_content_while_historical_evidence_stays_limited() {
+        let dishes = vec![dish(
+            "D01",
+            "New Chicken",
+            "main",
+            &["chicken"],
+            &["signature"],
+        )];
+        let preference = UserPreference {
+            liked_ingredients: vec!["chicken".to_string()],
+            ..UserPreference::default()
+        };
+        let output = generate_recommendations(&dishes, &[], &preference);
+        let result = &output.recommendations[0];
+
+        assert!(result.final_score > result.evidence.overall_confidence);
+        assert_eq!(
+            result.evidence.primary_evidence_source,
+            crate::recommender::evidence::EvidenceSource::ContentPreference
+        );
+        assert!(
+            result
+                .evidence
+                .evidence_notes
+                .iter()
+                .any(|note| note.contains("limited historical evidence"))
+        );
+    }
+
+    #[test]
+    fn one_rare_pair_cannot_create_high_evidence_confidence() {
+        let dishes = vec![
+            dish("D01", "Anchor", "main", &["rice"], &["local"]),
+            dish("D02", "Candidate", "side", &["egg"], &["local"]),
+        ];
+        let orders = vec![Order {
+            order_id: "O1".to_string(),
+            session_user_id: "U1".to_string(),
+            ordered_dishes: vec!["D01".to_string(), "D02".to_string()],
+            timestamp: "t".to_string(),
+        }];
+        let preference = UserPreference {
+            selected_dish_ids: vec!["D01".to_string()],
+            ..UserPreference::default()
+        };
+        let output = generate_recommendations(&dishes, &orders, &preference);
+        let result = &output.recommendations[0];
+
+        assert_eq!(result.evidence.candidate_pair_count, 1);
+        assert_ne!(
+            result.evidence.confidence_level,
+            crate::recommender::evidence::ConfidenceLevel::High
+        );
+    }
+
+    #[test]
+    fn repeated_context_evidence_increases_adaptive_co_order_weight() {
+        let dishes = vec![
+            dish("D01", "Anchor", "main", &["rice"], &["local"]),
+            dish("D02", "Candidate", "side", &["egg"], &["local"]),
+        ];
+        let preference = UserPreference {
+            liked_ingredients: vec!["egg".to_string()],
+            selected_dish_ids: vec!["D01".to_string()],
+            ..UserPreference::default()
+        };
+        let low_orders = vec![Order {
+            order_id: "O1".to_string(),
+            session_user_id: "U1".to_string(),
+            ordered_dishes: vec!["D01".to_string(), "D02".to_string()],
+            timestamp: "t".to_string(),
+        }];
+        let high_orders = (0..50)
+            .map(|index| Order {
+                order_id: format!("O{index}"),
+                session_user_id: format!("U{index}"),
+                ordered_dishes: if index < 5 {
+                    vec!["D01".to_string(), "D02".to_string()]
+                } else {
+                    vec!["D01".to_string()]
+                },
+                timestamp: "t".to_string(),
+            })
+            .collect::<Vec<_>>();
+
+        let low = generate_recommendations(&dishes, &low_orders, &preference);
+        let high = generate_recommendations(&dishes, &high_orders, &preference);
+        assert!(high.evidence_profile.dataset_strength > low.evidence_profile.dataset_strength);
+        assert!(
+            high.evidence_profile.collaborative_confidence
+                > low.evidence_profile.collaborative_confidence
+        );
+        assert!(high.adaptive_weights.co_order > low.adaptive_weights.co_order);
+        assert!(high.adaptive_weights.content < low.adaptive_weights.content);
+    }
+
+    #[test]
+    fn mature_no_input_fallback_is_popularity_led() {
+        let dishes = vec![
+            dish("D01", "Popular Rice", "main", &["rice"], &["local"]),
+            dish("D02", "New Side", "side", &["egg"], &["local"]),
+        ];
+        let orders = (0..50)
+            .map(|index| Order {
+                order_id: format!("O{index}"),
+                session_user_id: format!("U{index}"),
+                ordered_dishes: vec!["D01".to_string()],
+                timestamp: "t".to_string(),
+            })
+            .collect::<Vec<_>>();
+        let output = generate_recommendations(&dishes, &orders, &UserPreference::default());
+        let result = &output.recommendations[0];
+
+        assert_eq!(result.dish.dish_id, "D01");
+        assert_eq!(
+            result.evidence.primary_evidence_source,
+            crate::recommender::evidence::EvidenceSource::Popularity
+        );
+        assert!(
+            result
+                .evidence
+                .evidence_notes
+                .iter()
+                .any(|note| note.contains("popularity-based"))
+        );
     }
 }
