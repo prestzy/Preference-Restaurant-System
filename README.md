@@ -242,16 +242,16 @@ dish references. Details are in [Data Model](docs/data-model.md).
 PowerShell:
 
 ```powershell
-$env:ADMIN_USERNAME="restaurant-admin"
-$env:ADMIN_PASSWORD="choose-a-long-local-password"
+$env:ADMIN_USERNAME="admin"
+$env:ADMIN_PASSWORD="admin"
 cargo run
 ```
 
 Bash:
 
 ```bash
-ADMIN_USERNAME=restaurant-admin \
-ADMIN_PASSWORD='choose-a-long-local-password' \
+ADMIN_USERNAME=admin \
+ADMIN_PASSWORD='admin' \
 cargo run
 ```
 
