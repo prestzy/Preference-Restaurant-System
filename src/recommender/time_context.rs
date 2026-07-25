@@ -81,7 +81,7 @@ pub fn time_explanation(dish: &Dish, context: TimeContext, score: f32) -> Option
         TimeContext::Breakfast => format!("Boosted because {} fits breakfast context", dish.name),
         TimeContext::Lunch => format!("Boosted because {} fits lunch menu context", dish.name),
         TimeContext::Dinner => format!("Boosted because {} fits dinner context", dish.name),
-        TimeContext::Snack => format!("Suggested as a dessert/snack item"),
+        TimeContext::Snack => "Suggested as a dessert/snack item".to_string(),
         TimeContext::Any => unreachable!(),
     })
 }

@@ -272,8 +272,7 @@ textarea {
 .assistant-understood:empty,
 .assistant-upsells:empty,
 .status-message:empty,
-.evaluation-strip:empty,
-.csv-preview:empty {
+.evaluation-strip:empty {
   display: none;
 }
 
@@ -825,6 +824,12 @@ textarea {
   display: none;
 }
 
+.admin-section-nav form {
+  display: flex;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
 .admin-nav-link {
   display: inline-flex;
   align-items: center;
@@ -843,30 +848,6 @@ textarea {
   color: var(--app-surface);
   background: var(--color-primary);
   box-shadow: var(--shadow-small);
-}
-
-.data-tool-card {
-  display: grid;
-  gap: 10px;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: var(--app-surface);
-}
-
-.data-tool-card h3 {
-  margin: 0;
-}
-
-.data-tool-card textarea {
-  width: 100%;
-  min-width: 0;
-  resize: vertical;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 10px;
-  color: var(--text);
-  background: var(--app-surface);
 }
 
 .insight-grid {
@@ -1582,7 +1563,15 @@ th {
 
 .admin-page {
   display: grid;
+  /* Wide admin tables must contribute scroll width to their local table
+     wrapper, not force the page's implicit grid track beyond a tablet
+     viewport. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
+}
+
+.admin-page > * {
+  min-width: 0;
 }
 
 .method-label {
@@ -1716,36 +1705,6 @@ th {
   padding: 11px 12px;
   color: var(--text);
   background: var(--app-surface);
-}
-
-.csv-mode-row label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-weight: 700;
-}
-
-.csv-preview {
-  margin-top: 10px;
-}
-
-.csv-preview-table {
-  max-height: 230px;
-}
-
-.csv-ok,
-.csv-error {
-  margin: 8px 0;
-  font-weight: 800;
-}
-
-.csv-ok {
-  color: var(--app-success);
-}
-
-.csv-error {
-  color: var(--app-danger);
 }
 
 .field-label {

@@ -4,7 +4,7 @@ use crate::recommender::adaptive::{
 };
 use crate::recommender::popularity::PopularityCounts;
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Interpretable evidence-strength bands for recommendation cards.
 ///
@@ -74,7 +74,7 @@ pub struct RecommendationEvidence {
 /// Inputs needed to calculate evidence for one candidate.
 pub struct CandidateEvidenceInput<'a> {
     pub candidate_dish_id: &'a str,
-    pub orders: &'a [Order],
+    pub candidate_context_basket_count: usize,
     pub popularity_counts: &'a PopularityCounts,
     pub preference: &'a UserPreference,
     pub matched_liked_count: usize,
@@ -106,11 +106,7 @@ pub fn calculate_candidate_evidence(input: CandidateEvidenceInput<'_>) -> Recomm
     let content_evidence =
         finite_unit(input_strength * match_coverage * finite_unit(input.content_score));
 
-    let candidate_pair_count = count_candidate_context_baskets(
-        input.orders,
-        &input.preference.selected_dish_ids,
-        input.candidate_dish_id,
-    );
+    let candidate_pair_count = input.candidate_context_basket_count;
     let candidate_pair_strength =
         saturated_strength(candidate_pair_count, input.config.pair_count_target);
     let collaborative_evidence = finite_unit(
@@ -182,31 +178,41 @@ pub fn calculate_candidate_evidence(input: CandidateEvidenceInput<'_>) -> Recomm
     }
 }
 
-fn count_candidate_context_baskets(
+/// Counts candidate appearances with any selected dish in one pass.
+///
+/// A basket contributes at most once to each candidate even when it contains
+/// duplicate IDs or several selected context dishes. Building this map once per
+/// recommendation request avoids rescanning every historical order for every
+/// candidate evidence card.
+pub(crate) fn candidate_context_basket_counts(
     orders: &[Order],
     selected_dish_ids: &[String],
-    candidate_dish_id: &str,
-) -> usize {
+) -> HashMap<String, usize> {
     let selected = selected_dish_ids
         .iter()
         .map(|dish_id| dish_id.trim().to_uppercase())
         .filter(|dish_id| !dish_id.is_empty())
         .collect::<HashSet<_>>();
     if selected.is_empty() {
-        return 0;
+        return HashMap::new();
     }
-    let candidate = candidate_dish_id.trim().to_uppercase();
-    orders
-        .iter()
-        .filter(|order| {
-            let basket = order
-                .ordered_dishes
-                .iter()
-                .map(|dish_id| dish_id.trim().to_uppercase())
-                .collect::<HashSet<_>>();
-            basket.contains(&candidate) && basket.iter().any(|dish_id| selected.contains(dish_id))
-        })
-        .count()
+
+    let mut counts = HashMap::new();
+    for order in orders {
+        let basket = order
+            .ordered_dishes
+            .iter()
+            .map(|dish_id| dish_id.trim().to_uppercase())
+            .filter(|dish_id| !dish_id.is_empty())
+            .collect::<HashSet<_>>();
+        if !basket.iter().any(|dish_id| selected.contains(dish_id)) {
+            continue;
+        }
+        for dish_id in basket {
+            *counts.entry(dish_id).or_default() += 1;
+        }
+    }
+    counts
 }
 
 fn primary_source(contributions: EvidenceContributions) -> EvidenceSource {
@@ -344,14 +350,9 @@ mod tests {
             ],
             timestamp: "t".to_string(),
         }];
-        assert_eq!(
-            count_candidate_context_baskets(
-                &orders,
-                &["D01".to_string(), "D02".to_string()],
-                "D03"
-            ),
-            1
-        );
+        let counts =
+            candidate_context_basket_counts(&orders, &["D01".to_string(), "D02".to_string()]);
+        assert_eq!(counts.get("D03"), Some(&1));
     }
 
     #[test]
@@ -369,9 +370,11 @@ mod tests {
             ..UserPreference::default()
         };
         let popularity = [("D02".to_string(), 5)].into_iter().collect();
+        let context_counts =
+            candidate_context_basket_counts(&orders, &preference.selected_dish_ids);
         let evidence = calculate_candidate_evidence(CandidateEvidenceInput {
             candidate_dish_id: "D02",
-            orders: &orders,
+            candidate_context_basket_count: context_counts.get("D02").copied().unwrap_or(0),
             popularity_counts: &popularity,
             preference: &preference,
             matched_liked_count: 0,

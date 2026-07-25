@@ -20,12 +20,13 @@ pub struct DishRow {
     pub image_path: Option<String>,
     /// Optional source URL used only for documentation/source tracking.
     ///
-    /// The GUI does not hotlink this URL. Runtime image loading is local only.
+    /// The web interface does not hotlink this URL. Runtime image loading is
+    /// local only.
     #[serde(default)]
     pub image_source_url: Option<String>,
 }
 
-/// Clean dish model used by the recommendation algorithms and GUI.
+/// Clean dish model used by the recommendation algorithms and web application.
 ///
 /// Ingredients and tags are stored as vectors of lowercase strings so the
 /// ingredient-based filtering step can compare user preferences consistently.
@@ -74,7 +75,7 @@ pub struct Order {
     pub timestamp: String,
 }
 
-/// User preference values entered in the GUI.
+/// User preference values selected in the customer or admin web interface.
 ///
 /// The fields are intentionally simple vectors because the FYP prototype is
 /// designed to demonstrate explainable filtering rather than complex user
@@ -115,7 +116,7 @@ impl UserPreference {
     }
 }
 
-/// A single recommendation row shown in the GUI.
+/// A scored recommendation returned to customer or admin web views.
 ///
 /// Keeping the individual ingredient, co-order, and hybrid scores visible makes
 /// the prototype suitable for an FYP presentation because every recommendation

@@ -1,131 +1,106 @@
-# Preston's Restaurant UI Design System
+# UI Design System
 
-## Brand Direction
+## Direction
 
-Customer pages use **Preston's Restaurant**. Admin research pages use the
-academic name **Preference-Driven Restaurant Ordering System**. Both surfaces
-share the Catppuccin Latte design system so the prototype feels consistent
-without making the denser admin tools resemble the customer menu.
+The interface uses Catppuccin Latte-inspired semantic tokens with a calm,
+high-contrast restaurant application layout. Customer pages are mobile-first;
+admin pages use responsive cards and scroll-contained tables.
 
-## Catppuccin Latte
+## Principles
 
-The canonical tokens live in `static/app.css`. The application uses the
-official Catppuccin Latte values, then maps them to semantic roles:
+- The customer Menu is permanent and complete. Search is a locator only.
+- Core actions are visually clear and at least 44px on touch devices.
+- Orange is not the system palette; semantic Catppuccin tokens define accents,
+  surfaces, status, and focus.
+- Cards are individual content units, not nested page-section decoration.
+- Long tables scroll inside their own container, never the whole page.
+- Loading, empty, success, error, disabled, selected, and focus states are
+  explicit.
 
-| Role | Application token | Catppuccin source |
-|---|---|---|
-| Page background | `--app-background` | Base `#eff1f5` |
-| Secondary background | `--app-background-secondary` | Mantle `#e6e9ef` |
-| Raised surface | `--app-surface` | White `#ffffff` |
-| Muted surface | `--app-surface-muted` | Crust `#dce0e8` |
-| Main text | `--app-text` | Text `#4c4f69` |
-| Muted text | `--app-text-muted` | Subtext 0 `#6c6f85` |
-| Primary action | `--app-primary` | Maroon `#e64553` |
-| Primary hover | `--app-primary-hover` | Flamingo `#dd7878` |
-| Supporting accent | `--app-accent` | Peach `#fe640b` |
-| Success | `--app-success` | Green `#40a02b` |
-| Warning | `--app-warning` | Yellow `#df8e1d` |
-| Danger | `--app-danger` | Red `#d20f39` |
-| Information | `--app-info` | Blue `#1e66f5` |
-| Keyboard focus | `--app-focus` | Lavender `#7287fd` |
+## Semantic Tokens
 
-Legacy aliases remain temporarily so existing components can migrate without
-duplicating values. Those aliases resolve to the semantic variables and must
-not introduce alternative shades.
+`static/app.css` defines the source of truth. Contributors should use variables
+for:
 
-## Typography
+- page and elevated surfaces;
+- primary/secondary text;
+- borders;
+- accent and accent hover;
+- success, warning, and danger;
+- spacing;
+- card/control radius;
+- shadow; and
+- visible keyboard focus.
 
-The application uses the local system stack:
+Do not add hardcoded one-off colours when an existing semantic token represents
+the meaning.
 
-```css
-Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif
-```
+## Layout
 
-Headings are compact and strong. Mobile inputs use at least `16px` text to
-avoid browser zoom. Supporting copy uses Catppuccin Subtext.
+- Mobile first from 360px.
+- Main content tracks use `minmax(0, 1fr)` to permit shrinking.
+- Horizontal recommendation rails own their `overflow-x`.
+- Category and option chips can scroll/wrap inside their section.
+- The bottom navigation remains reachable without covering interactive content.
+- Tablet/desktop breakpoints add columns only when content remains readable.
 
-## Spacing, Radius, and Shadows
+## Components
 
-- Touch targets: at least `44px`.
-- Small radius: `10px`.
-- Medium radius: `16px`.
-- Large radius: `22px`.
-- Pills: `999px`.
-- Shadows use translucent Catppuccin Text.
-- Major sections use distinct vertical spacing and avoid decorative nested
-  cards.
+### Dish Card
 
-## Buttons and Status
+Shows local image/placeholder, name, category, tags, ingredient preview, price,
+details action, and Add action. The permanent Menu card has a stable
+`id="dish-Dxx"` target for search location/highlight.
 
-- Primary: Maroon fill with a light label.
-- Secondary: white surface with Catppuccin border and Text/Maroon label.
-- Destructive: Red, reserved for delete, cancel, and clear operations.
-- Completed, ready, and available: Green.
-- Pending: Yellow.
-- Preparing: Peach.
-- Information: Blue.
-- Every status includes text and never relies on colour alone.
-- Keyboard focus uses a Lavender outline with a non-`color-mix()` fallback.
+### Recommendation Card
 
-## Icon System
+Adds recommendation reason, score/evidence label, and recommendation badge. It
+does not replace or filter Menu cards.
 
-The server templates and dynamic JavaScript use one inline, Lucide-compatible
-SVG subset. All icons use `24 x 24` view boxes, round line caps, two-pixel
-strokes, and `currentColor`, so component semantics determine their
-Catppuccin colour.
+### Chips
 
-Decorative icons have `aria-hidden="true"` and `focusable="false"`.
-Icon-only controls, such as Cart quantity and remove buttons, have
-dish-specific `aria-label` and `title` text. Interface controls do not use
-emoji or unrelated raster symbols.
+Use buttons or form controls with selected state and focus visibility. Liked and
+disliked ingredients are mutually exclusive in application state.
 
-## Cards and Chips
+### Tables
 
-Food cards prioritize the dish image, name, price, category, and primary
-action. Long ingredients are line-clamped with full details available in the
-dish dialog. Inactive chips use neutral surfaces; active chips use Maroon or
-Peach with readable text.
+Wrap wide admin tables in the shared scroll container. Actions use a vertical or
+wrapped gap so Edit, availability, and Delete icons do not touch.
 
-## Cart Layout
+### Modal
 
-Every desktop and tablet Cart row uses the same CSS Grid columns:
+Use native dialog where supported, label it with the dish title, move focus
+inside when opened, close on the standard control/Escape, and return focus to
+the trigger.
 
-```text
-76px | dish details | quantity stepper | line total | 44px remove action
-```
+### Feedback
 
-The quantity stepper uses fixed `44px / 40-52px / 44px` tracks. Quantity,
-unit price, line total, and summary values use tabular numerals. Browser code
-uses one `formatCurrency()` helper and displays all prices as `RM0.00`.
+Use inline errors and non-blocking toast/status regions. Fetch controls restore
+their loading state in `finally`. Avoid browser `alert()` as the primary
+mechanism.
 
-At widths up to `640px`, the row becomes a controlled three-row grid. The
-image and remove action stay fixed, while quantity and total receive their own
-rows. This prevents long dish names from moving controls or creating
-horizontal overflow.
+## Accessibility
 
-The summary distinguishes unique dishes, total portions, and subtotal.
-Quantity changes recalculate the line total and summary in place without a
-page reload.
+- Icon-only buttons require `aria-label`.
+- Tabs require `role=tab`, `aria-selected`, and `aria-controls`.
+- Form controls require visible labels.
+- Status/error regions should use appropriate live announcement.
+- Do not remove focus outlines without a visible replacement.
+- Images require useful alt text or a decorative empty alt.
+- Colour must not be the only status indicator.
 
-## Mobile Navigation
+## Responsive Verification
 
-The bottom navigation uses four equal touch targets and safe-area padding.
-The active item includes a label, Maroon icon/text, and Peach underline.
-Content includes matching bottom padding so checkout controls are not hidden.
+Test:
 
-## Tablet and Admin Layouts
+- 360x800
+- 390x844
+- 414x896
+- 768x1024
+- 820x1180
+- 1024x1366
+- desktop
 
-At tablet widths, menu grids expand where space permits. Administrative forms
-use additional columns. Tables convert to labelled row cards on phones.
-Recommendation Tester tools remain grouped into Production, Experiments,
-Explainability, and Learning History.
-
-## Accessibility Rules
-
-- Visible Lavender `:focus-visible` outline.
-- Minimum `44px` action targets.
-- Native labels for fields and `aria-live` result/status regions.
-- Dialogs fit within the viewport and scroll internally.
-- No interaction depends on hover.
-- No page-level horizontal overflow.
-- Destructive timeline actions require explicit confirmation.
+At each width check page horizontal overflow, search dropdown containment,
+recommendation rail scrolling, card text wrapping, preference option spacing,
+Cart alignment, table containment, and bottom navigation clearance.

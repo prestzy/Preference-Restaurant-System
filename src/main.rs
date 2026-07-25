@@ -2,18 +2,15 @@ mod agent;
 mod data_loader;
 mod models;
 mod persistence;
-#[allow(dead_code)]
 mod preferences;
 mod recommender;
-#[allow(dead_code)]
 mod search;
-#[allow(dead_code)]
-mod simulation;
 mod web;
 
 use anyhow::{Context, Result};
 use data_loader::{
     DISHES_PATH, ORDERS_PATH, generate_sample_data_if_missing, load_dishes, load_orders,
+    validate_order_dish_references,
 };
 use persistence::learning_events::{LEARNING_EVENTS_PATH, load_learning_events};
 use persistence::order_details::{ORDER_DETAILS_PATH, load_order_details};
@@ -34,6 +31,8 @@ async fn main() -> Result<()> {
 
     let dishes = load_dishes(DISHES_PATH).context("failed to load dishes.csv")?;
     let orders = load_orders(ORDERS_PATH).context("failed to load orders.csv")?;
+    validate_order_dish_references(&orders, &dishes)
+        .context("historical orders contain unknown dishes")?;
     let order_details =
         load_order_details(ORDER_DETAILS_PATH).context("failed to load order_details.csv")?;
     // A missing or malformed explanatory timeline must not prevent ordering.

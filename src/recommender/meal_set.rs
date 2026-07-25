@@ -430,7 +430,7 @@ fn evaluate_set(
         .iter()
         .map(|item| item.dish.category.clone())
         .collect::<HashSet<_>>();
-    let useful_target = chosen.len().min(4).max(1);
+    let useful_target = chosen.len().clamp(1, 4);
     let category_coverage = (represented.len() as f32 / useful_target as f32).min(1.0);
     let pair = pair_metrics(chosen, matrix);
     let set_diversity = set_diversity(chosen);

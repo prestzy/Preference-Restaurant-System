@@ -27,12 +27,17 @@ pub fn build_popularity_counts(orders: &[Order]) -> PopularityCounts {
     counts
 }
 
-/// Converts a dish count into a normalized popularity score from 0.0 to 1.0.
-///
-/// The most frequent dish receives 1.0. Dishes without historical appearances
-/// receive 0.0, but can still be recommended by content/time signals.
-pub fn calculate_popularity_score(counts: &PopularityCounts, dish_id: &str) -> f32 {
-    let max_count = counts.values().copied().max().unwrap_or(0);
+/// Returns the strongest basket frequency used to normalize all candidates.
+pub(crate) fn maximum_popularity_count(counts: &PopularityCounts) -> u32 {
+    counts.values().copied().max().unwrap_or(0)
+}
+
+/// Calculates popularity using a request-scoped maximum count.
+pub(crate) fn calculate_popularity_score_with_max(
+    counts: &PopularityCounts,
+    dish_id: &str,
+    max_count: u32,
+) -> f32 {
     if max_count == 0 {
         return 0.0;
     }
@@ -67,8 +72,18 @@ mod tests {
 
         let counts = build_popularity_counts(&orders);
 
-        assert_eq!(calculate_popularity_score(&counts, "D01"), 1.0);
-        assert_eq!(calculate_popularity_score(&counts, "D02"), 0.5);
-        assert_eq!(calculate_popularity_score(&counts, "D99"), 0.0);
+        let maximum = maximum_popularity_count(&counts);
+        assert_eq!(
+            calculate_popularity_score_with_max(&counts, "D01", maximum),
+            1.0
+        );
+        assert_eq!(
+            calculate_popularity_score_with_max(&counts, "D02", maximum),
+            0.5
+        );
+        assert_eq!(
+            calculate_popularity_score_with_max(&counts, "D99", maximum),
+            0.0
+        );
     }
 }

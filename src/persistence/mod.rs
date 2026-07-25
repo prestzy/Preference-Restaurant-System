@@ -4,5 +4,6 @@
 //! details are stored separately so the collaborative-filtering dataset is not
 //! polluted with operational customer fields.
 
+pub mod atomic_file;
 pub mod learning_events;
 pub mod order_details;

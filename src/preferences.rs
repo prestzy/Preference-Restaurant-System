@@ -1,6 +1,6 @@
 //! Preference option extraction from dish data.
 //!
-//! The GUI should not ask users to guess valid ingredient or tag names. This
+//! The web interface should not ask users to guess valid ingredient or tag names. This
 //! module derives the available selectable options from the loaded CSV dataset,
 //! keeping the extraction logic separate from rendering code.
 
@@ -47,7 +47,7 @@ pub fn extract_preference_options(dishes: &[Dish]) -> PreferenceOptions {
 /// Normalizes one selectable option.
 ///
 /// Options are trimmed and lowercased so `Chicken`, ` chicken `, and `chicken`
-/// appear as one clear choice in the GUI.
+/// appear as one clear choice in the preference controls.
 fn normalize_option(value: &str) -> Option<String> {
     let normalized = value.trim().to_lowercase();
     (!normalized.is_empty()).then_some(normalized)

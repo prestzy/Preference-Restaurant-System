@@ -5,7 +5,7 @@ use std::collections::HashSet;
 ///
 /// In this prototype, disliked terms are used as a hard exclusion rule. The
 /// field is still named `disliked_ingredients` for backward compatibility with
-/// the original GUI, but the Smart Menu Assistant may also place negated tags
+/// the original preference flow, but the Smart Menu Assistant may also place negated tags
 /// such as `spicy` here so phrases like "no spicy" can be respected.
 pub fn check_disliked_ingredients(dish: &Dish, preference: &UserPreference) -> bool {
     !matched_disliked_ingredients(dish, preference).is_empty()
@@ -37,7 +37,7 @@ pub fn calculate_ingredient_score(dish: &Dish, preference: &UserPreference) -> f
 
 /// Builds a human-readable explanation for the ingredient filtering result.
 ///
-/// The GUI displays this text beside each recommendation so the user can see
+/// The web interface displays this text beside each recommendation so the user can see
 /// why the dish was ranked. Explainability is one of the main goals of this FYP
 /// prototype.
 pub fn build_ingredient_explanation(dish: &Dish, preference: &UserPreference) -> String {

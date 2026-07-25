@@ -141,16 +141,16 @@ pub fn customer_menu_page(view: &MenuView, session: &CustomerSession) -> String 
         clear_icon = icon_svg("x")
     );
 
-    page_shell(
-        "Home",
-        "home",
-        &content,
-        &view.dishes_json,
-        &view.recommendations_json,
-        &view.preference_options_json,
-        &view.search_vocabulary_json,
-        Some(session),
-    )
+    page_shell(CustomerPageShell {
+        title: "Home",
+        active_nav: "home",
+        content: &content,
+        dishes_json: &view.dishes_json,
+        recommendations_json: &view.recommendations_json,
+        preference_options_json: &view.preference_options_json,
+        search_vocabulary_json: &view.search_vocabulary_json,
+        customer_session: Some(session),
+    })
 }
 
 /// Renders the prototype cart page.
@@ -180,7 +180,7 @@ pub fn cart_page(view: &MenuView, session: &CustomerSession) -> String {
                 <button class="primary-action" id="checkout-button" type="button">{checkout_icon} Place Order</button>
             </div>
             <p class="muted">FYP prototype: no payment is processed.</p>
-            <p class="status-message" id="checkout-status"></p>
+            <p class="status-message" id="checkout-status" aria-live="polite"></p>
         </section>
     "#,
         name = escape_html(&session.customer_name),
@@ -190,16 +190,16 @@ pub fn cart_page(view: &MenuView, session: &CustomerSession) -> String {
         checkout_icon = icon_svg("circle-check")
     );
 
-    page_shell(
-        "Cart",
-        "cart",
-        &content,
-        &view.dishes_json,
-        &view.recommendations_json,
-        &view.preference_options_json,
-        &view.search_vocabulary_json,
-        Some(session),
-    )
+    page_shell(CustomerPageShell {
+        title: "Cart",
+        active_nav: "cart",
+        content: &content,
+        dishes_json: &view.dishes_json,
+        recommendations_json: &view.recommendations_json,
+        preference_options_json: &view.preference_options_json,
+        search_vocabulary_json: &view.search_vocabulary_json,
+        customer_session: Some(session),
+    })
 }
 
 pub fn customer_start_page(
@@ -337,16 +337,16 @@ fn profile_page_inner(
         table_attr = escape_attr(&session.table_number),
     );
 
-    page_shell(
-        "Profile",
-        "profile",
-        &content,
-        &view.dishes_json,
-        &view.recommendations_json,
-        &view.preference_options_json,
-        &view.search_vocabulary_json,
-        Some(session),
-    )
+    page_shell(CustomerPageShell {
+        title: "Profile",
+        active_nav: "profile",
+        content: &content,
+        dishes_json: &view.dishes_json,
+        recommendations_json: &view.recommendations_json,
+        preference_options_json: &view.preference_options_json,
+        search_vocabulary_json: &view.search_vocabulary_json,
+        customer_session: Some(session),
+    })
 }
 
 fn order_card(order: &LiveOrder) -> String {
@@ -478,31 +478,6 @@ pub fn admin_recommendations_page(view: &MenuView, admin: &AdminView) -> String 
     )
 }
 
-pub fn admin_data_page(view: &MenuView) -> String {
-    let content = format!(
-        r#"
-        <section class="plain-page admin-page">
-            <h1>Data Tools</h1>
-            <p>CSV tools have been removed from the visible admin workflow to keep staff management simple for the FYP demo.</p>
-            {}
-            <section class="admin-card">
-                <div class="section-heading"><h2>CSV Tools Removed</h2><p>Dish and order data still load from data/dishes.csv and data/orders.csv at startup. Staff-facing management is handled from Dish Management and Orders.</p></div>
-            </section>
-        </section>
-        "#,
-        admin_section_nav("data")
-    );
-
-    admin_page_shell(
-        "Admin Data",
-        &content,
-        &view.dishes_json,
-        &view.recommendations_json,
-        &view.preference_options_json,
-        &view.search_vocabulary_json,
-    )
-}
-
 pub fn admin_login_page(username: Option<&str>, message: Option<&str>) -> String {
     let username = username.map(escape_attr).unwrap_or_default();
     let message = message
@@ -546,17 +521,20 @@ pub fn admin_login_page(username: Option<&str>, message: Option<&str>) -> String
     )
 }
 
-fn page_shell(
-    title: &str,
-    active: &str,
-    content: &str,
-    dishes_json: &str,
-    recommendations_json: &str,
-    preference_options_json: &str,
-    search_vocabulary_json: &str,
-    customer_session: Option<&CustomerSession>,
-) -> String {
-    let customer_json = customer_session
+struct CustomerPageShell<'a> {
+    title: &'a str,
+    active_nav: &'a str,
+    content: &'a str,
+    dishes_json: &'a str,
+    recommendations_json: &'a str,
+    preference_options_json: &'a str,
+    search_vocabulary_json: &'a str,
+    customer_session: Option<&'a CustomerSession>,
+}
+
+fn page_shell(page: CustomerPageShell<'_>) -> String {
+    let customer_json = page
+        .customer_session
         .and_then(|session| serde_json::to_string(session).ok())
         .unwrap_or_else(|| "null".to_string());
     format!(
@@ -580,18 +558,19 @@ fn page_shell(
 </head>
 <body>
     <main class="app-shell">
-        {content}
+        {}
     </main>
     {}
 </body>
 </html>"#,
-        escape_html(title),
-        dishes_json,
-        recommendations_json,
-        preference_options_json,
-        search_vocabulary_json,
+        escape_html(page.title),
+        page.dishes_json,
+        page.recommendations_json,
+        page.preference_options_json,
+        page.search_vocabulary_json,
         customer_json,
-        bottom_nav(active)
+        page.content,
+        bottom_nav(page.active_nav)
     )
 }
 
@@ -680,7 +659,6 @@ fn admin_section_nav(active: &str) -> String {
             "/admin/recommendations",
             "flask-conical",
         ),
-        ("logout", "Logout", "/admin/logout", "log-out"),
     ];
     let items = links
         .iter()
@@ -695,7 +673,12 @@ fn admin_section_nav(active: &str) -> String {
         })
         .collect::<String>();
 
-    format!(r#"<nav class="admin-section-nav">{items}</nav>"#)
+    let logout = format!(
+        r#"<form action="/admin/logout" method="post"><button class="admin-nav-link" type="submit">{}Logout</button></form>"#,
+        icon_svg("log-out")
+    );
+
+    format!(r#"<nav class="admin-section-nav">{items}{logout}</nav>"#)
 }
 
 fn preference_group(title: &str, help: &str, kind: &str, values: &[String]) -> String {
@@ -703,7 +686,7 @@ fn preference_group(title: &str, help: &str, kind: &str, values: &[String]) -> S
         .iter()
         .map(|value| {
             format!(
-                r#"<button class="mini-chip" type="button" data-preference-kind="{kind}" data-preference-value="{}">{}</button>"#,
+                r#"<button class="mini-chip" type="button" aria-pressed="false" data-preference-kind="{kind}" data-preference-value="{}">{}</button>"#,
                 escape_attr(value),
                 escape_html(value)
             )
@@ -886,7 +869,7 @@ fn image_block(dish: &DishView, extra_class: &str) -> String {
 fn dish_detail_modal() -> String {
     format!(
         r#"
-    <dialog class="dish-modal" id="dish-detail-modal">
+    <dialog class="dish-modal" id="dish-detail-modal" aria-labelledby="dish-detail-title">
         <div class="modal-content">
             <button class="modal-close icon-button" type="button" data-close-dish-modal aria-label="Close dish details">{}</button>
             <div id="dish-detail-content"></div>
@@ -1520,7 +1503,6 @@ fn plain_select_options(values: &[String], pipe_label: bool) -> String {
             let (option_value, label) = if pipe_label {
                 value
                     .split_once('|')
-                    .map(|(id, label)| (id, label))
                     .unwrap_or((value.as_str(), value.as_str()))
             } else {
                 (value.as_str(), value.as_str())
@@ -1608,55 +1590,6 @@ fn historical_order_options_for_select(orders: &[Order]) -> String {
             .collect::<String>(),
     );
     options
-}
-
-#[allow(dead_code)]
-fn csv_data_tools_panel() -> String {
-    r#"
-        <section class="admin-card">
-            <div class="section-heading">
-                <div>
-                    <h2>CSV Import / Reload / Export</h2>
-                    <p>Use compatible dishes.csv and orders.csv files. Preview validates required columns before import.</p>
-                </div>
-            </div>
-            <p class="status-message" id="csv-import-status"></p>
-
-            <div class="admin-two-column">
-                <div class="data-tool-card">
-                    <h3>Dishes CSV</h3>
-                    <p class="muted">Required columns: dish_id, name, ingredients, category, tags.</p>
-                    <input id="dish-csv-file" type="file" accept=".csv,text/csv">
-                    <textarea id="dish-csv-import" rows="7" placeholder="Upload a CSV file or paste dishes.csv content here"></textarea>
-                    <div class="csv-mode-row">
-                        <label><input type="radio" name="dish-import-mode" value="replace" checked> Replace current dishes</label>
-                        <label><input type="radio" name="dish-import-mode" value="merge"> Merge by dish ID</label>
-                    </div>
-                    <div class="form-actions">
-                        <button class="primary-action" id="import-dishes-button" type="button">Import Dishes</button>
-                        <button class="ghost-action" id="reload-dishes-button" type="button">Reload data/dishes.csv</button>
-                        <a class="ghost-link" href="/admin/export/dishes.csv">Export Dishes</a>
-                    </div>
-                    <div class="csv-preview" id="dish-csv-preview"></div>
-                </div>
-
-                <div class="data-tool-card">
-                    <h3>Orders CSV</h3>
-                    <p class="muted">Required columns: order_id, session_user_id, ordered_dishes, timestamp.</p>
-                    <input id="order-csv-file" type="file" accept=".csv,text/csv">
-                    <textarea id="order-csv-import" rows="7" placeholder="Upload a CSV file or paste orders.csv content here"></textarea>
-                    <div class="form-actions">
-                        <button class="primary-action" id="import-orders-button" type="button">Import Orders</button>
-                        <button class="ghost-action" id="reload-orders-button" type="button">Reload data/orders.csv</button>
-                        <a class="ghost-link" href="/admin/export/orders.csv">Export Historical Orders</a>
-                        <a class="ghost-link" href="/admin/export/completed-session-orders.csv">Export Completed Session Orders</a>
-                    </div>
-                    <div class="csv-preview" id="order-csv-preview"></div>
-                </div>
-            </div>
-        </section>
-    "#
-    .to_string()
 }
 
 /// Renders the shared inline Lucide icon subset.
@@ -1875,6 +1808,19 @@ mod tests {
     }
 
     #[test]
+    fn preference_chips_expose_toggle_state_to_assistive_technology() {
+        let html = preference_group(
+            "Liked Ingredients",
+            "Ingredients the customer wants more often.",
+            "liked_ingredients",
+            &["chicken".to_string()],
+        );
+
+        assert!(html.contains("aria-pressed=\"false\""));
+        assert!(html.contains("data-preference-kind=\"liked_ingredients\""));
+    }
+
+    #[test]
     fn admin_login_links_back_to_the_customer_menu() {
         let html = admin_login_page(None, None);
 
@@ -1985,15 +1931,23 @@ mod tests {
     }
 
     #[test]
-    fn standalone_experiment_manual_documents_all_three_workflows() {
-        let manual = include_str!("../../docs/recommendation-experiment-lab-manual.md");
+    fn recommendation_tester_guide_documents_all_nine_tools() {
+        let guide = include_str!("../../docs/recommendation-tester-guide.md");
 
-        assert!(manual.contains("Experiment 1: Ingredient Impact"));
-        assert!(manual.contains("Experiment 2: Co-Order Impact"));
-        assert!(manual.contains("Experiment 3: Method Comparison"));
-        assert!(manual.contains("Run Ingredient Experiment"));
-        assert!(manual.contains("Run Co-Order Experiment"));
-        assert!(manual.contains("Run Method Comparison"));
-        assert!(manual.contains("does not modify the real `data/orders.csv`"));
+        for tool in [
+            "Adaptive Scoring Inspector",
+            "Confidence and Evidence Meter",
+            "Diversity and Discovery",
+            "Budget-Aware Meal Set Tester",
+            "Ingredient Impact",
+            "Co-Order Impact",
+            "Method Comparison",
+            "What Would Change?",
+            "How the Recommender Learned",
+        ] {
+            assert!(guide.contains(tool));
+        }
+        assert!(guide.contains("Real history remains unchanged"));
+        assert!(guide.contains("Unsafe conclusion"));
     }
 }

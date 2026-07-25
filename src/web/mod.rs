@@ -6,5 +6,7 @@
 
 pub mod handlers;
 pub mod routes;
+mod session;
 pub mod state;
 mod templates;
+mod validation;

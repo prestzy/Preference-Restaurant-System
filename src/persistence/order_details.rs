@@ -1,3 +1,4 @@
+use crate::persistence::atomic_file::replace_file_safely;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
@@ -42,22 +43,28 @@ pub fn append_order_detail(record: &OrderDetailRecord, path: &str) -> Result<()>
     ensure_parent(path)?;
     let has_content = Path::new(path).exists() && fs::metadata(path)?.len() > 0;
     let file = OpenOptions::new().create(true).append(true).open(path)?;
+    let sync_file = file.try_clone()?;
     let mut writer = csv::WriterBuilder::new()
         .has_headers(!has_content)
         .from_writer(file);
     writer.serialize(record)?;
     writer.flush()?;
+    drop(writer);
+    sync_file.sync_all()?;
     Ok(())
 }
 
 pub fn rewrite_order_details(records: &[OrderDetailRecord], path: &str) -> Result<()> {
     ensure_parent(path)?;
-    let mut writer = csv::Writer::from_path(path)?;
-    for record in records {
-        writer.serialize(record)?;
+    let mut payload = Vec::new();
+    {
+        let mut writer = csv::Writer::from_writer(&mut payload);
+        for record in records {
+            writer.serialize(record)?;
+        }
+        writer.flush()?;
     }
-    writer.flush()?;
-    Ok(())
+    replace_file_safely(Path::new(path), &payload)
 }
 
 fn ensure_parent(path: &str) -> Result<()> {

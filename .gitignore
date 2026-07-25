@@ -1,1 +1,13 @@
 /target
+
+# Local configuration and diagnostic output
+.env
+*.log
+*.tmp
+*.bak
+.DS_Store
+
+# Runtime state can contain customer contact details or session-specific
+# recommendation evidence. Safe schemas/examples stay tracked separately.
+data/order_details.csv
+data/recommendation_learning_events.jsonl

@@ -1,5 +1,7 @@
 use crate::models::{Dish, DishRow, Order, OrderRow};
 use anyhow::{Result, bail};
+use chrono::NaiveDateTime;
+use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
@@ -98,8 +100,9 @@ pub fn parse_dishes_from_reader<R: Read>(reader: R) -> Result<Vec<Dish>> {
         &["dish_id", "name", "ingredients", "category", "tags"],
     )?;
     let mut dishes = Vec::new();
+    let mut seen_ids = HashSet::new();
 
-    for result in reader.records() {
+    for (index, result) in reader.records().enumerate() {
         let record = result?;
         if record.iter().all(|field| field.trim().is_empty()) {
             continue;
@@ -107,7 +110,16 @@ pub fn parse_dishes_from_reader<R: Read>(reader: R) -> Result<Vec<Dish>> {
 
         let row: DishRow = record.deserialize(Some(&headers))?;
 
-        dishes.push(clean_dish_row(row));
+        let dish = clean_dish_row(row);
+        validate_dish(&dish, index + 2)?;
+        if !seen_ids.insert(dish.dish_id.clone()) {
+            bail!(
+                "Duplicate dish ID {} on CSV row {}.",
+                dish.dish_id,
+                index + 2
+            );
+        }
+        dishes.push(dish);
     }
 
     Ok(dishes)
@@ -199,8 +211,9 @@ pub fn parse_orders_from_reader<R: Read>(reader: R) -> Result<Vec<Order>> {
         &["order_id", "session_user_id", "ordered_dishes", "timestamp"],
     )?;
     let mut orders = Vec::new();
+    let mut seen_ids = HashSet::new();
 
-    for result in reader.records() {
+    for (index, result) in reader.records().enumerate() {
         let record = result?;
         if record.iter().all(|field| field.trim().is_empty()) {
             continue;
@@ -208,7 +221,16 @@ pub fn parse_orders_from_reader<R: Read>(reader: R) -> Result<Vec<Order>> {
 
         let row: OrderRow = record.deserialize(Some(&headers))?;
 
-        orders.push(clean_order_row(row));
+        let order = clean_order_row(row);
+        validate_order(&order, index + 2)?;
+        if !seen_ids.insert(order.order_id.to_uppercase()) {
+            bail!(
+                "Duplicate order ID {} on CSV row {}.",
+                order.order_id,
+                index + 2
+            );
+        }
+        orders.push(order);
     }
 
     Ok(orders)
@@ -234,11 +256,15 @@ pub fn orders_to_csv(orders: &[Order]) -> Result<String> {
 }
 
 fn clean_order_row(row: OrderRow) -> Order {
+    let mut seen_dishes = HashSet::new();
     let ordered_dishes = row
         .ordered_dishes
         .split(',')
         .map(|dish_id| dish_id.trim().to_uppercase())
         .filter(|dish_id| !dish_id.is_empty())
+        // Historical rows represent baskets, not quantities. Deduplicating here
+        // prevents a malformed row from inflating popularity or pair evidence.
+        .filter(|dish_id| seen_dishes.insert(dish_id.clone()))
         .collect();
 
     Order {
@@ -247,6 +273,81 @@ fn clean_order_row(row: OrderRow) -> Order {
         ordered_dishes,
         timestamp: row.timestamp.trim().to_string(),
     }
+}
+
+fn validate_dish(dish: &Dish, row_number: usize) -> Result<()> {
+    if !is_stable_id(&dish.dish_id) {
+        bail!(
+            "Invalid dish ID on CSV row {row_number}. Use letters, numbers, dash, or underscore."
+        );
+    }
+    if dish.name.trim().is_empty() {
+        bail!("Dish name is required on CSV row {row_number}.");
+    }
+    if dish.category.trim().is_empty() {
+        bail!("Dish category is required on CSV row {row_number}.");
+    }
+    if dish.ingredients.is_empty() {
+        bail!("At least one ingredient is required on CSV row {row_number}.");
+    }
+    Ok(())
+}
+
+fn validate_order(order: &Order, row_number: usize) -> Result<()> {
+    if !is_stable_id(&order.order_id) {
+        bail!(
+            "Invalid order ID on CSV row {row_number}. Use letters, numbers, dash, or underscore."
+        );
+    }
+    if !is_stable_id(&order.session_user_id) {
+        bail!(
+            "Invalid session user ID on CSV row {row_number}. Use letters, numbers, dash, or underscore."
+        );
+    }
+    if order.ordered_dishes.is_empty() {
+        bail!("At least one ordered dish is required on CSV row {row_number}.");
+    }
+    NaiveDateTime::parse_from_str(&order.timestamp, "%Y-%m-%d %H:%M").map_err(|_| {
+        anyhow::anyhow!("Invalid timestamp on CSV row {row_number}; expected YYYY-MM-DD HH:MM.")
+    })?;
+    Ok(())
+}
+
+fn is_stable_id(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && value.len() <= 32
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+}
+
+/// Ensures every historical basket refers to a dish in the loaded menu.
+///
+/// Startup calls this after loading both CSV files so spelling mistakes cannot
+/// silently create invisible co-order nodes.
+pub fn validate_order_dish_references(orders: &[Order], dishes: &[Dish]) -> Result<()> {
+    let known_ids = dishes
+        .iter()
+        .map(|dish| dish.dish_id.as_str())
+        .collect::<HashSet<_>>();
+    let unknown = orders
+        .iter()
+        .flat_map(|order| {
+            order
+                .ordered_dishes
+                .iter()
+                .filter(|dish_id| !known_ids.contains(dish_id.as_str()))
+                .map(move |dish_id| format!("{} in {}", dish_id, order.order_id))
+        })
+        .collect::<Vec<_>>();
+    if !unknown.is_empty() {
+        bail!(
+            "Historical orders reference unknown dish ID(s): {}.",
+            unknown.join(", ")
+        );
+    }
+    Ok(())
 }
 
 /// Validates that a CSV file contains the columns required by the prototype.
@@ -269,29 +370,6 @@ fn validate_required_headers(headers: &csv::StringRecord, required: &[&str]) -> 
     if !missing.is_empty() {
         bail!("CSV missing required column(s): {}", missing.join(", "));
     }
-
-    Ok(())
-}
-
-/// Appends a simulated order to `data/orders.csv`.
-///
-/// This is optional in the GUI. Keeping it separate from the in-memory update
-/// makes the demo clear: one path changes behaviour only for the current app
-/// session, while this path persists the new behavioural data.
-#[allow(dead_code)]
-pub fn append_order_to_csv(order: &Order, path: &str) -> Result<()> {
-    let file = OpenOptions::new().create(true).append(true).open(path)?;
-    let mut writer = csv::WriterBuilder::new()
-        .has_headers(false)
-        .from_writer(file);
-
-    writer.write_record([
-        order.order_id.as_str(),
-        order.session_user_id.as_str(),
-        order.ordered_dishes.join(",").as_str(),
-        order.timestamp.as_str(),
-    ])?;
-    writer.flush()?;
 
     Ok(())
 }
@@ -336,11 +414,15 @@ pub fn append_completed_order_to_csv(
             "U{}",
             next_numeric_id(&existing_orders, |order| &order.session_user_id)
         ),
-        ordered_dishes: ordered_dishes
-            .iter()
-            .map(|dish_id| dish_id.trim().to_uppercase())
-            .filter(|dish_id| !dish_id.is_empty())
-            .collect(),
+        ordered_dishes: {
+            let mut seen = HashSet::new();
+            ordered_dishes
+                .iter()
+                .map(|dish_id| dish_id.trim().to_uppercase())
+                .filter(|dish_id| !dish_id.is_empty())
+                .filter(|dish_id| seen.insert(dish_id.clone()))
+                .collect()
+        },
         timestamp: timestamp.trim().to_string(),
     };
 
@@ -358,6 +440,7 @@ pub fn append_completed_order_to_csv(
         csv_quoted_field(&order.ordered_dishes.join(",")),
         csv_quoted_field(&order.timestamp)
     )?;
+    file.sync_all()?;
 
     Ok(order)
 }
@@ -396,6 +479,7 @@ fn ensure_trailing_newline(path: &Path) -> Result<()> {
 
     let mut file = OpenOptions::new().append(true).open(path)?;
     file.write_all(b"\n")?;
+    file.sync_all()?;
     Ok(())
 }
 
@@ -490,6 +574,62 @@ O001,U01,2026-01-01 12:30
             .expect_err("missing ordered_dishes should be reported");
 
         assert!(error.to_string().contains("ordered_dishes"));
+    }
+
+    #[test]
+    fn duplicate_ids_and_invalid_timestamps_are_rejected() {
+        let duplicate_dishes = r#"dish_id,name,ingredients,category,tags
+D01,Nasi Lemak,rice,main,local
+d01,Duplicate Rice,rice,main,local
+"#;
+        let duplicate_orders = r#"order_id,session_user_id,ordered_dishes,timestamp
+O001,U01,D01,2026-01-01 12:30
+o001,U02,D01,2026-01-01 12:31
+"#;
+        let invalid_timestamp = r#"order_id,session_user_id,ordered_dishes,timestamp
+O001,U01,D01,unix:12345
+"#;
+
+        assert!(
+            parse_dishes_from_reader(Cursor::new(duplicate_dishes))
+                .expect_err("duplicate dish IDs should fail")
+                .to_string()
+                .contains("Duplicate dish ID")
+        );
+        assert!(
+            parse_orders_from_reader(Cursor::new(duplicate_orders))
+                .expect_err("duplicate order IDs should fail")
+                .to_string()
+                .contains("Duplicate order ID")
+        );
+        assert!(
+            parse_orders_from_reader(Cursor::new(invalid_timestamp))
+                .expect_err("invalid timestamps should fail")
+                .to_string()
+                .contains("YYYY-MM-DD HH:MM")
+        );
+    }
+
+    #[test]
+    fn duplicate_basket_items_are_deduplicated_and_unknown_dishes_are_reported() {
+        let csv = r#"order_id,session_user_id,ordered_dishes,timestamp
+O001,U01,"D01,D01,D99",2026-01-01 12:30
+"#;
+        let orders = parse_orders_from_reader(Cursor::new(csv)).expect("order should parse");
+        let dishes = vec![Dish {
+            dish_id: "D01".to_string(),
+            name: "Nasi Lemak".to_string(),
+            ingredients: vec!["rice".to_string()],
+            category: "main".to_string(),
+            tags: vec![],
+            image_path: None,
+            image_source_url: None,
+        }];
+
+        assert_eq!(orders[0].ordered_dishes, vec!["D01", "D99"]);
+        let error = validate_order_dish_references(&orders, &dishes)
+            .expect_err("unknown dish should be reported");
+        assert!(error.to_string().contains("D99 in O001"));
     }
 
     #[test]

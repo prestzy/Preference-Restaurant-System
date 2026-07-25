@@ -1,11 +1,11 @@
 //! JSON Lines persistence for recommendation learning events.
 
+use crate::persistence::atomic_file::replace_file_safely;
 use crate::recommender::learning_timeline::RecommendationLearningEvent;
 use anyhow::{Context, Result};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const LEARNING_EVENTS_PATH: &str = "data/recommendation_learning_events.jsonl";
 
@@ -45,6 +45,7 @@ pub fn append_learning_event(event: &RecommendationLearningEvent, path: &str) ->
     serde_json::to_writer(&mut file, event)?;
     file.write_all(b"\n")?;
     file.flush()?;
+    file.sync_all()?;
     Ok(true)
 }
 
@@ -63,52 +64,11 @@ pub fn rewrite_learning_events(events: &[RecommendationLearningEvent], path: &st
         .with_context(|| format!("failed to rewrite learning timeline {path}"))
 }
 
-/// Writes a complete replacement before moving it over the active timeline.
-///
-/// Windows cannot rename a new file over an existing destination. The short
-/// backup step therefore keeps the previous valid file recoverable if the
-/// final move fails. This helper is deliberately private to timeline
-/// persistence and never receives the historical order CSV path.
-fn replace_file_safely(target: &Path, payload: &[u8]) -> Result<()> {
-    let suffix = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let file_name = target
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("recommendation_learning_events.jsonl");
-    let parent = target.parent().unwrap_or_else(|| Path::new("."));
-    let temporary = parent.join(format!(".{file_name}.{suffix}.tmp"));
-    let backup = parent.join(format!(".{file_name}.{suffix}.bak"));
-
-    let mut file = fs::File::create(&temporary)?;
-    file.write_all(payload)?;
-    file.sync_all()?;
-
-    let had_target = target.exists();
-    if had_target {
-        fs::rename(target, &backup)?;
-    }
-
-    if let Err(error) = fs::rename(&temporary, target) {
-        if had_target {
-            let _ = fs::rename(&backup, target);
-        }
-        let _ = fs::remove_file(&temporary);
-        return Err(error.into());
-    }
-
-    if had_target {
-        let _ = fs::remove_file(backup);
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::recommender::learning_timeline::RecommendationLearningEvent;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn event(id: &str) -> RecommendationLearningEvent {
         RecommendationLearningEvent {

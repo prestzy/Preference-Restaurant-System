@@ -2,22 +2,28 @@ use crate::models::{Dish, Order, RecommendationResult, UserPreference};
 use crate::recommender::adaptive::{
     AdaptiveScoringConfig, AdaptiveWeights, RecommendationEvidenceProfile,
 };
-use crate::recommender::association_metrics::best_association_metric;
+use crate::recommender::association_metrics::best_association_metric_from_counts;
 use crate::recommender::collaborative_filter::{
-    build_co_order_matrix, calculate_co_order_score, related_selected_dishes,
+    CoOrderMatrix, build_co_order_matrix, calculate_co_order_score_with_max,
+    related_selected_dishes, strongest_related_count,
 };
 use crate::recommender::diversity_reranker::{
     DiversityMetrics, DiversityMode, DiversityRerankerConfig, rerank_recommendations,
 };
-use crate::recommender::evidence::{CandidateEvidenceInput, calculate_candidate_evidence};
+use crate::recommender::evidence::{
+    CandidateEvidenceInput, calculate_candidate_evidence, candidate_context_basket_counts,
+};
 use crate::recommender::explanation::build_adaptive_explanation;
 use crate::recommender::ingredient_filter::{
     calculate_ingredient_score, check_disliked_ingredients, matched_disliked_ingredients,
     matched_liked_ingredients, matched_preferred_tags,
 };
-use crate::recommender::popularity::{build_popularity_counts, calculate_popularity_score};
+use crate::recommender::popularity::{
+    PopularityCounts, build_popularity_counts, calculate_popularity_score_with_max,
+    maximum_popularity_count,
+};
 use crate::recommender::time_context::{TimeContext, calculate_time_score};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Summary values displayed in the Evaluation / Prototype Testing section.
 ///
@@ -44,6 +50,66 @@ pub struct RecommendationOutput {
     pub scoring_config: AdaptiveScoringConfig,
     pub diversity_mode: DiversityMode,
     pub diversity_metrics: DiversityMetrics,
+}
+
+/// Reusable indexes and configuration for one recommendation request.
+///
+/// These values are derived once before candidate scoring. In particular, the
+/// co-order normalizer, popularity normalizer, context-basket counts, evidence
+/// profile, and adaptive weights no longer require repeated historical-order
+/// scans for every dish.
+struct RecommendationScoringContext {
+    co_order_matrix: CoOrderMatrix,
+    popularity_counts: PopularityCounts,
+    candidate_context_counts: HashMap<String, usize>,
+    co_order_max_count: u32,
+    popularity_max_count: u32,
+    time_context: TimeContext,
+    ranking_method: RankingMethod,
+    adaptive_config: AdaptiveScoringConfig,
+    evidence_profile: RecommendationEvidenceProfile,
+    adaptive_weights: AdaptiveWeights,
+    selected_set: HashSet<String>,
+}
+
+impl RecommendationScoringContext {
+    fn build(orders: &[Order], preference: &UserPreference) -> Self {
+        let co_order_matrix = build_co_order_matrix(orders);
+        let popularity_counts = build_popularity_counts(orders);
+        let time_context =
+            TimeContext::from_label(preference.time_context.as_deref().unwrap_or("Any"));
+        let ranking_method = RankingMethod::from_value(preference.ranking_method.as_deref());
+        let adaptive_config = AdaptiveScoringConfig::default();
+        let evidence_profile = RecommendationEvidenceProfile::build(
+            orders,
+            &co_order_matrix,
+            &preference.selected_dish_ids,
+            preference.has_content_preferences(),
+            time_context != TimeContext::Any,
+            adaptive_config,
+        );
+        let adaptive_weights = AdaptiveWeights::for_profile(&evidence_profile);
+        let co_order_max_count =
+            strongest_related_count(&co_order_matrix, &preference.selected_dish_ids);
+        let popularity_max_count = maximum_popularity_count(&popularity_counts);
+        let candidate_context_counts =
+            candidate_context_basket_counts(orders, &preference.selected_dish_ids);
+        let selected_set = preference.selected_dish_ids.iter().cloned().collect();
+
+        Self {
+            co_order_matrix,
+            popularity_counts,
+            candidate_context_counts,
+            co_order_max_count,
+            popularity_max_count,
+            time_context,
+            ranking_method,
+            adaptive_config,
+            evidence_profile,
+            adaptive_weights,
+            selected_set,
+        }
+    }
 }
 
 /// Runs the production pipeline: base adaptive scoring followed by the
@@ -81,26 +147,12 @@ pub fn generate_recommendations(
     orders: &[Order],
     preference: &UserPreference,
 ) -> RecommendationOutput {
-    let co_order_matrix = build_co_order_matrix(orders);
-    let popularity_counts = build_popularity_counts(orders);
-    let time_context = TimeContext::from_label(preference.time_context.as_deref().unwrap_or("Any"));
-    let ranking_method = RankingMethod::from_value(preference.ranking_method.as_deref());
-    let adaptive_config = AdaptiveScoringConfig::default();
-    let evidence_profile = RecommendationEvidenceProfile::build(
-        orders,
-        &co_order_matrix,
-        &preference.selected_dish_ids,
-        preference.has_content_preferences(),
-        time_context != TimeContext::Any,
-        adaptive_config,
-    );
-    let adaptive_weights = AdaptiveWeights::for_profile(&evidence_profile);
-    let selected_set: HashSet<String> = preference.selected_dish_ids.iter().cloned().collect();
+    let context = RecommendationScoringContext::build(orders, preference);
     let mut recommendations = Vec::new();
     let mut stats = RecommendationStats::default();
 
     for dish in dishes {
-        if selected_set.contains(&dish.dish_id) {
+        if context.selected_set.contains(&dish.dish_id) {
             stats.skipped_selected_dishes += 1;
             continue;
         }
@@ -121,17 +173,26 @@ pub fn generate_recommendations(
             stats.matched_preference_dishes += 1;
         }
 
-        let co_order_score = calculate_co_order_score(
-            &co_order_matrix,
+        let co_order_score = calculate_co_order_score_with_max(
+            &context.co_order_matrix,
             &preference.selected_dish_ids,
             &dish.dish_id,
+            context.co_order_max_count,
         );
-        let popularity_score = calculate_popularity_score(&popularity_counts, &dish.dish_id);
-        let business_rule_score = calculate_time_score(dish, time_context);
+        let popularity_score = calculate_popularity_score_with_max(
+            &context.popularity_counts,
+            &dish.dish_id,
+            context.popularity_max_count,
+        );
+        let business_rule_score = calculate_time_score(dish, context.time_context);
         let evidence = calculate_candidate_evidence(CandidateEvidenceInput {
             candidate_dish_id: &dish.dish_id,
-            orders,
-            popularity_counts: &popularity_counts,
+            candidate_context_basket_count: context
+                .candidate_context_counts
+                .get(&dish.dish_id)
+                .copied()
+                .unwrap_or(0),
+            popularity_counts: &context.popularity_counts,
             preference,
             matched_liked_count: matched_liked_ingredients.len(),
             matched_tag_count: matched_preferred_tags.len(),
@@ -139,17 +200,17 @@ pub fn generate_recommendations(
             co_order_score,
             popularity_score,
             time_context_score: business_rule_score,
-            profile: &evidence_profile,
-            weights: adaptive_weights,
-            config: adaptive_config,
+            profile: &context.evidence_profile,
+            weights: context.adaptive_weights,
+            config: context.adaptive_config,
         });
         let mut final_score = combine_scores(
             ingredient_score,
             co_order_score,
             popularity_score,
             business_rule_score,
-            ranking_method,
-            adaptive_weights,
+            context.ranking_method,
+            context.adaptive_weights,
         );
 
         if final_score <= 0.0 {
@@ -164,12 +225,17 @@ pub fn generate_recommendations(
         }
 
         let related_selected_dish_ids = related_selected_dishes(
-            &co_order_matrix,
+            &context.co_order_matrix,
             &preference.selected_dish_ids,
             &dish.dish_id,
         );
-        let association =
-            best_association_metric(orders, &preference.selected_dish_ids, &dish.dish_id);
+        let association = best_association_metric_from_counts(
+            &context.co_order_matrix,
+            &context.popularity_counts,
+            orders.len(),
+            &preference.selected_dish_ids,
+            &dish.dish_id,
+        );
 
         recommendations.push(RecommendationResult {
             dish: dish.clone(),
@@ -186,7 +252,7 @@ pub fn generate_recommendations(
             max_similarity: 0.0,
             category_bonus: 0.0,
             diversity_notes: Vec::new(),
-            adaptive_weights,
+            adaptive_weights: context.adaptive_weights,
             evidence: evidence.clone(),
             association_base_dish_id: association
                 .as_ref()
@@ -218,12 +284,12 @@ pub fn generate_recommendations(
                 co_order_score,
                 popularity_score,
                 business_rule_score,
-                time_context,
+                context.time_context,
                 association
                     .as_ref()
                     .map(|metric| metric.lift)
                     .unwrap_or(0.0),
-                adaptive_weights,
+                context.adaptive_weights,
                 &evidence,
             ),
         });
@@ -245,9 +311,9 @@ pub fn generate_recommendations(
     RecommendationOutput {
         recommendations,
         stats,
-        evidence_profile,
-        adaptive_weights,
-        scoring_config: adaptive_config,
+        evidence_profile: context.evidence_profile,
+        adaptive_weights: context.adaptive_weights,
+        scoring_config: context.adaptive_config,
         diversity_mode: DiversityMode::Balanced,
         diversity_metrics: DiversityMetrics::default(),
     }

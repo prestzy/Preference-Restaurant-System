@@ -50,27 +50,27 @@ pub fn build_co_order_matrix(orders: &[Order]) -> CoOrderMatrix {
     matrix
 }
 
-/// Calculates a normalised co-order score between 0.0 and 1.0.
+/// Calculates a co-order score with a request-scoped normalisation value.
 ///
-/// The candidate count is the total number of times the candidate dish appeared
-/// with any selected dish. It is divided by the strongest available co-order
-/// count for the selected dishes, so the best related candidate receives 1.0.
-pub fn calculate_co_order_score(
+/// The hybrid recommender computes `max_related_count` once per request and
+/// reuses it for every candidate. The public wrapper above remains convenient
+/// for isolated experiment calculations.
+pub(crate) fn calculate_co_order_score_with_max(
     matrix: &CoOrderMatrix,
     selected_dish_ids: &[String],
     candidate_dish_id: &str,
+    max_related_count: u32,
 ) -> f32 {
     if selected_dish_ids.is_empty() || selected_dish_ids.iter().any(|id| id == candidate_dish_id) {
         return 0.0;
     }
 
     let candidate_count = co_order_count(matrix, selected_dish_ids, candidate_dish_id);
-    let max_count = max_related_count(matrix, selected_dish_ids);
 
-    if max_count == 0 {
+    if max_related_count == 0 {
         0.0
     } else {
-        (candidate_count as f32 / max_count as f32).clamp(0.0, 1.0)
+        (candidate_count as f32 / max_related_count as f32).clamp(0.0, 1.0)
     }
 }
 
@@ -121,7 +121,7 @@ fn co_order_count(
 ///
 /// This value is used as the normalisation denominator in
 /// `calculate_co_order_score`.
-fn max_related_count(matrix: &CoOrderMatrix, selected_dish_ids: &[String]) -> u32 {
+pub(crate) fn strongest_related_count(matrix: &CoOrderMatrix, selected_dish_ids: &[String]) -> u32 {
     let selected_set: HashSet<&String> = selected_dish_ids.iter().collect();
     let mut totals: HashMap<String, u32> = HashMap::new();
 

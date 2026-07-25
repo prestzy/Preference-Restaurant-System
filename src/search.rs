@@ -1,8 +1,7 @@
-//! Menu search and filtering utilities.
+//! Ranked menu search used by the customer dish locator.
 //!
-//! This module is deliberately separate from egui rendering code. The GUI can
-//! ask for parsed filter terms and matching dishes, while tests can verify the
-//! search behaviour without constructing any desktop UI.
+//! Search returns suggestions and match reasons only. It never mutates or
+//! filters the server-rendered static Menu.
 
 use crate::models::Dish;
 use csv::ReaderBuilder;
@@ -23,15 +22,7 @@ pub enum MatchMode {
 }
 
 impl MatchMode {
-    /// Human-readable label used by the GUI segmented control.
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Any => "Match Any",
-            Self::All => "Match All",
-        }
-    }
-
-    /// Parses browser/API values into the same enum used by desktop filtering.
+    /// Parses browser/API values into the search service mode.
     ///
     /// Keeping this conversion in the search module avoids separate "any/all"
     /// interpretations in route handlers or JavaScript.
@@ -40,31 +31,6 @@ impl MatchMode {
             "any" | "match_any" | "match-any" => Self::Any,
             _ => Self::All,
         }
-    }
-}
-
-/// Parsed menu search filter.
-///
-/// The raw search field can contain comma, semicolon, pipe, or newline-separated
-/// terms. Parsed terms are lowercase and empty values are removed.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SearchFilter {
-    pub terms: Vec<String>,
-    pub mode: MatchMode,
-}
-
-impl SearchFilter {
-    /// Builds a search filter from raw user input and a selected match mode.
-    pub fn parse(raw_input: &str, mode: MatchMode) -> Self {
-        Self {
-            terms: parse_filter_terms(raw_input),
-            mode,
-        }
-    }
-
-    /// Returns true if no active terms are present.
-    pub fn is_empty(&self) -> bool {
-        self.terms.is_empty()
     }
 }
 
@@ -299,13 +265,12 @@ fn best_group_match(dish: &Dish, group: &ExpandedSearchGroup) -> Option<FieldMat
             &normalized_ingredients,
             &normalized_tags,
         );
-        if let Some(candidate) = candidate {
-            if best
+        if let Some(candidate) = candidate
+            && best
                 .as_ref()
                 .is_none_or(|current| candidate.score > current.score)
-            {
-                best = Some(candidate);
-            }
+        {
+            best = Some(candidate);
         }
     }
     best
@@ -507,52 +472,6 @@ fn fallback_concepts() -> HashMap<String, Vec<String>> {
     .collect()
 }
 
-/// Returns dishes that match the supplied search filter.
-pub fn filter_dishes<'a>(dishes: &'a [Dish], filter: &SearchFilter) -> Vec<&'a Dish> {
-    dishes
-        .iter()
-        .filter(|dish| dish_matches_filter(dish, filter))
-        .collect()
-}
-
-/// Checks whether one dish satisfies the complete search filter.
-pub fn dish_matches_filter(dish: &Dish, filter: &SearchFilter) -> bool {
-    if filter.is_empty() {
-        return true;
-    }
-
-    match filter.mode {
-        MatchMode::Any => filter
-            .terms
-            .iter()
-            .any(|term| dish_matches_single_term(dish, term)),
-        MatchMode::All => filter
-            .terms
-            .iter()
-            .all(|term| dish_matches_single_term(dish, term)),
-    }
-}
-
-/// Checks whether one search term matches a dish.
-///
-/// Search covers the user-facing fields stakeholders expect: dish ID, dish
-/// name, category, ingredients, and tags.
-pub fn dish_matches_single_term(dish: &Dish, term: &str) -> bool {
-    let term = term.trim().to_lowercase();
-    if term.is_empty() {
-        return true;
-    }
-
-    dish.dish_id.to_lowercase().contains(&term)
-        || dish.name.to_lowercase().contains(&term)
-        || dish.category.to_lowercase().contains(&term)
-        || dish
-            .ingredients
-            .iter()
-            .any(|ingredient| ingredient.contains(&term))
-        || dish.tags.iter().any(|tag| tag.contains(&term))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -590,18 +509,34 @@ mod tests {
 
     #[test]
     fn match_any_accepts_one_matching_term() {
-        let filter = SearchFilter::parse("dessert, coconut milk", MatchMode::Any);
+        let dishes = vec![
+            sample_dish(),
+            dish_with("D02", "Fruit Pudding", &["mango"], &["dessert"]),
+        ];
+        let vocabulary = build_search_vocabulary(&dishes);
+        let results = search_dishes(
+            &dishes,
+            "dessert, coconut milk",
+            MatchMode::Any,
+            &vocabulary,
+        );
 
-        assert!(dish_matches_filter(&sample_dish(), &filter));
+        assert_eq!(results.len(), 2);
     }
 
     #[test]
     fn match_all_requires_every_term() {
-        let matching_filter = SearchFilter::parse("nasi; spicy; main", MatchMode::All);
-        let failing_filter = SearchFilter::parse("nasi; dessert", MatchMode::All);
+        let dishes = vec![
+            sample_dish(),
+            dish_with("D02", "Fruit Pudding", &["mango"], &["dessert"]),
+        ];
+        let vocabulary = build_search_vocabulary(&dishes);
+        let matching = search_dishes(&dishes, "nasi; spicy; main", MatchMode::All, &vocabulary);
+        let failing = search_dishes(&dishes, "nasi; dessert", MatchMode::All, &vocabulary);
 
-        assert!(dish_matches_filter(&sample_dish(), &matching_filter));
-        assert!(!dish_matches_filter(&sample_dish(), &failing_filter));
+        assert_eq!(matching.len(), 1);
+        assert_eq!(matching[0].dish_id, "D01");
+        assert!(failing.is_empty());
     }
 
     #[test]

@@ -2,11 +2,10 @@ use crate::web::state::{CustomerRegistrationRequest, CustomerSession, WebState};
 use crate::web::templates;
 use axum::Form;
 use axum::extract::State;
-use axum::http::header::{COOKIE, LOCATION, SET_COOKIE};
+use axum::http::header::{LOCATION, SET_COOKIE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use serde::Deserialize;
-use std::env;
 
 pub const CUSTOMER_SESSION_COOKIE: &str = "customer_session";
 const CUSTOMER_SESSION_MAX_AGE_SECONDS: u32 = 8 * 60 * 60;
@@ -121,45 +120,19 @@ pub fn current_customer_session(state: &WebState, headers: &HeaderMap) -> Option
 }
 
 pub fn customer_session_id_from_headers(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get(COOKIE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|cookies| {
-            cookies.split(';').find_map(|cookie| {
-                let (name, value) = cookie.trim().split_once('=')?;
-                (name == CUSTOMER_SESSION_COOKIE).then(|| value.to_string())
-            })
-        })
+    crate::web::session::cookie_value(headers, CUSTOMER_SESSION_COOKIE)
 }
 
 pub(crate) fn customer_session_cookie(session_id: &str) -> String {
-    format!(
-        "{CUSTOMER_SESSION_COOKIE}={session_id}; HttpOnly; SameSite=Lax; Path=/; Max-Age={CUSTOMER_SESSION_MAX_AGE_SECONDS}{}",
-        secure_cookie_attribute()
+    crate::web::session::session_cookie(
+        CUSTOMER_SESSION_COOKIE,
+        session_id,
+        CUSTOMER_SESSION_MAX_AGE_SECONDS,
     )
 }
 
 fn expired_customer_session_cookie() -> String {
-    format!(
-        "{CUSTOMER_SESSION_COOKIE}=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/{}",
-        secure_cookie_attribute()
-    )
-}
-
-/// Cookies remain usable over local plain HTTP by default. Deployments that
-/// terminate HTTPS can opt into the Secure attribute explicitly.
-pub(crate) fn secure_cookie_attribute() -> &'static str {
-    match env::var("APP_COOKIE_SECURE") {
-        Ok(value)
-            if matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes"
-            ) =>
-        {
-            "; Secure"
-        }
-        _ => "",
-    }
+    crate::web::session::expired_session_cookie(CUSTOMER_SESSION_COOKIE)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -184,6 +157,7 @@ mod tests {
     use super::*;
     use axum::body::to_bytes;
     use axum::http::HeaderValue;
+    use axum::http::header::COOKIE;
 
     fn valid_form() -> CustomerRegistrationForm {
         CustomerRegistrationForm {

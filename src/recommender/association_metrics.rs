@@ -1,4 +1,6 @@
 use crate::models::Order;
+use crate::recommender::collaborative_filter::CoOrderMatrix;
+use crate::recommender::popularity::PopularityCounts;
 use serde::Serialize;
 use std::collections::HashSet;
 
@@ -17,24 +19,80 @@ pub struct AssociationMetric {
     pub lift: f32,
 }
 
-/// Finds the strongest association metric from any selected dish to a candidate.
+/// Finds the strongest association using request-scoped frequency indexes.
 ///
-/// When the customer has multiple selected/cart dishes, the recommender uses the
-/// relationship with the highest lift, then highest confidence, then pair count.
-pub fn best_association_metric(
-    orders: &[Order],
+/// `CoOrderMatrix` and `PopularityCounts` already count each malformed duplicate
+/// dish ID once per basket. Reusing those indexes produces the same support,
+/// confidence, and lift as rescanning all orders, but in constant time per
+/// selected-dish/candidate pair.
+pub(crate) fn best_association_metric_from_counts(
+    matrix: &CoOrderMatrix,
+    popularity_counts: &PopularityCounts,
+    total_orders: usize,
     selected_dish_ids: &[String],
     candidate_dish_id: &str,
 ) -> Option<AssociationMetric> {
     selected_dish_ids
         .iter()
-        .filter_map(|base| calculate_association_metric(orders, base, candidate_dish_id))
+        .filter_map(|base| {
+            calculate_association_metric_from_counts(
+                matrix,
+                popularity_counts,
+                total_orders,
+                base,
+                candidate_dish_id,
+            )
+        })
         .max_by(|a, b| {
             a.lift
                 .total_cmp(&b.lift)
                 .then_with(|| a.confidence.total_cmp(&b.confidence))
                 .then_with(|| a.pair_count.cmp(&b.pair_count))
         })
+}
+
+fn calculate_association_metric_from_counts(
+    matrix: &CoOrderMatrix,
+    popularity_counts: &PopularityCounts,
+    total_orders: usize,
+    base_dish_id: &str,
+    candidate_dish_id: &str,
+) -> Option<AssociationMetric> {
+    let base = base_dish_id.trim().to_uppercase();
+    let candidate = candidate_dish_id.trim().to_uppercase();
+    if base.is_empty() || candidate.is_empty() || base == candidate || total_orders == 0 {
+        return None;
+    }
+
+    let pair_count = matrix
+        .get(&base)
+        .and_then(|related| related.get(&candidate))
+        .copied()
+        .unwrap_or(0);
+    let base_count = popularity_counts.get(&base).copied().unwrap_or(0);
+    let candidate_count = popularity_counts.get(&candidate).copied().unwrap_or(0);
+    if pair_count == 0 || base_count == 0 || candidate_count == 0 {
+        return None;
+    }
+
+    let total_orders = total_orders as f32;
+    let support = pair_count as f32 / total_orders;
+    let confidence = pair_count as f32 / base_count as f32;
+    let candidate_support = candidate_count as f32 / total_orders;
+    let lift = if candidate_support > 0.0 {
+        confidence / candidate_support
+    } else {
+        0.0
+    };
+
+    Some(AssociationMetric {
+        base_dish_id: base,
+        candidate_dish_id: candidate,
+        pair_count,
+        support,
+        confidence,
+        lift,
+    })
 }
 
 /// Calculates support, confidence, and lift for base dish A -> candidate dish B.
@@ -129,5 +187,33 @@ mod tests {
         assert!((metric.support - 0.5).abs() < f32::EPSILON);
         assert!((metric.confidence - 0.6666667).abs() < 0.0001);
         assert!((metric.lift - 0.8888889).abs() < 0.0001);
+    }
+
+    #[test]
+    fn precomputed_indexes_match_order_scan_metrics() {
+        let orders = vec![
+            order("O1", &["D01", "D02"]),
+            order("O2", &["D01", "D02", "D03"]),
+            order("O3", &["D01"]),
+            order("O4", &["D02"]),
+        ];
+        let matrix = crate::recommender::collaborative_filter::build_co_order_matrix(&orders);
+        let popularity = crate::recommender::popularity::build_popularity_counts(&orders);
+
+        let scanned = calculate_association_metric(&orders, "D01", "D02")
+            .expect("fixture should contain a pair");
+        let indexed = calculate_association_metric_from_counts(
+            &matrix,
+            &popularity,
+            orders.len(),
+            "D01",
+            "D02",
+        )
+        .expect("indexes should contain the same pair");
+
+        assert_eq!(indexed.pair_count, scanned.pair_count);
+        assert!((indexed.support - scanned.support).abs() < f32::EPSILON);
+        assert!((indexed.confidence - scanned.confidence).abs() < f32::EPSILON);
+        assert!((indexed.lift - scanned.lift).abs() < f32::EPSILON);
     }
 }

@@ -1,21 +1,16 @@
-use crate::data_loader::{
-    DISHES_PATH, ORDERS_PATH, dishes_to_csv, load_dishes, load_orders, orders_to_csv,
-    parse_dishes_from_reader, parse_orders_from_reader,
-};
+use crate::data_loader::{dishes_to_csv, orders_to_csv};
 use crate::web::state::{
-    DishView, EvaluationRequest, EvaluationResponse, ExperimentLabRequest, ExperimentLabResponse,
-    OrderStatus, OrderStatusUpdate, OrderSyncResponse, SimulationRequest, SimulationResponse,
-    UpsertDishRequest, WebState,
+    DishView, ExperimentLabRequest, ExperimentLabResponse, OrderStatus, OrderStatusUpdate,
+    OrderSyncResponse, SimulationRequest, SimulationResponse, UpsertDishRequest, WebState,
 };
 use crate::web::templates;
 use axum::Json;
 use axum::extract::{Form, Path, State};
-use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, COOKIE, LOCATION, SET_COOKIE};
+use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, LOCATION, SET_COOKIE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::io::Cursor;
 
 pub const ADMIN_SESSION_COOKIE: &str = "admin_session";
 const ADMIN_SESSION_MAX_AGE_SECONDS: u32 = 12 * 60 * 60;
@@ -57,7 +52,19 @@ fn process_admin_login(
     };
 
     if payload.username.trim() == credentials.0 && payload.password == credentials.1 {
-        let session_id = state.create_admin_session();
+        let session_id = match state.create_admin_session() {
+            Ok(session_id) => session_id,
+            Err(message) => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Html(templates::admin_login_page(
+                        Some(&payload.username),
+                        Some(&message),
+                    )),
+                )
+                    .into_response();
+            }
+        };
         let cookie = admin_session_cookie(&session_id);
         println!("Admin authentication succeeded; admin session created.");
         return (
@@ -136,34 +143,11 @@ pub async fn admin_evaluation_page(State(state): State<WebState>, headers: Heade
     redirect_to_admin_recommendations()
 }
 
-pub async fn admin_data_page(State(state): State<WebState>, headers: HeaderMap) -> Response {
-    if !is_admin_authenticated(&state, &headers) {
-        return redirect_to_login();
-    }
-    let view = state.menu_view();
-    Html(templates::admin_data_page(&view)).into_response()
-}
-
 pub async fn admin_insights_page(State(state): State<WebState>, headers: HeaderMap) -> Response {
     if !is_admin_authenticated(&state, &headers) {
         return redirect_to_login();
     }
     Redirect::to("/admin").into_response()
-}
-
-#[allow(dead_code)]
-pub async fn run_evaluation(
-    State(state): State<WebState>,
-    headers: HeaderMap,
-    Json(payload): Json<EvaluationRequest>,
-) -> Json<ApiResponse<EvaluationResponse>> {
-    if !is_admin_authenticated(&state, &headers) {
-        return Json(ApiResponse::error("Admin login required."));
-    }
-    Json(ApiResponse::ok(
-        "Evaluation completed.",
-        Some(state.evaluation_report(payload)),
-    ))
 }
 
 pub async fn run_simulation(
@@ -336,118 +320,6 @@ pub async fn set_dish_availability(
     }
 }
 
-/// Imports dish CSV text pasted into the admin tool.
-///
-/// Import uses the same parser as startup loading, so older five-column CSV
-/// files and newer image-aware CSV files are both accepted.
-pub async fn import_dishes_csv(
-    State(state): State<WebState>,
-    headers: HeaderMap,
-    Json(payload): Json<CsvImportRequest>,
-) -> Json<ApiResponse<usize>> {
-    if !is_admin_authenticated(&state, &headers) {
-        return Json(ApiResponse::error("Admin login required."));
-    }
-    match parse_dishes_from_reader(Cursor::new(payload.csv)) {
-        Ok(dishes) if dishes.is_empty() => Json(ApiResponse::error("CSV contained no dishes.")),
-        Ok(dishes) => {
-            let mode = ImportMode::from_value(payload.mode.as_deref());
-            let count = match mode {
-                ImportMode::Replace => state.replace_dishes_from_csv(dishes),
-                ImportMode::Merge => state.merge_dishes_from_csv(dishes),
-            };
-            Json(ApiResponse::ok(
-                format!(
-                    "{} {count} dish record(s) into memory.",
-                    mode.past_tense_label()
-                ),
-                Some(count),
-            ))
-        }
-        Err(error) => Json(ApiResponse::error(format!(
-            "Dish CSV import failed: {error}"
-        ))),
-    }
-}
-
-/// Reloads dishes directly from `data/dishes.csv`.
-///
-/// This is the simplest practical admin workflow for the FYP demo: staff can
-/// edit the CSV file in a spreadsheet and click reload instead of pasting rows
-/// into a browser text area.
-pub async fn reload_dishes_from_file(
-    State(state): State<WebState>,
-    headers: HeaderMap,
-) -> Json<ApiResponse<usize>> {
-    if !is_admin_authenticated(&state, &headers) {
-        return Json(ApiResponse::error("Admin login required."));
-    }
-    match load_dishes(DISHES_PATH) {
-        Ok(dishes) if dishes.is_empty() => {
-            Json(ApiResponse::error("data/dishes.csv contained no dishes."))
-        }
-        Ok(dishes) => {
-            let count = state.replace_dishes_from_csv(dishes);
-            Json(ApiResponse::ok(
-                format!("Reloaded {count} dish record(s) from {DISHES_PATH}."),
-                Some(count),
-            ))
-        }
-        Err(error) => Json(ApiResponse::error(format!(
-            "Reload from {DISHES_PATH} failed: {error}"
-        ))),
-    }
-}
-
-/// Imports historical order CSV text pasted into the admin tool.
-pub async fn import_orders_csv(
-    State(state): State<WebState>,
-    headers: HeaderMap,
-    Json(payload): Json<CsvImportRequest>,
-) -> Json<ApiResponse<usize>> {
-    if !is_admin_authenticated(&state, &headers) {
-        return Json(ApiResponse::error("Admin login required."));
-    }
-    match parse_orders_from_reader(Cursor::new(payload.csv)) {
-        Ok(orders) if orders.is_empty() => Json(ApiResponse::error("CSV contained no orders.")),
-        Ok(orders) => {
-            let count = state.replace_historical_orders_from_csv(orders);
-            Json(ApiResponse::ok(
-                format!("Imported {count} historical order record(s) into memory."),
-                Some(count),
-            ))
-        }
-        Err(error) => Json(ApiResponse::error(format!(
-            "Order CSV import failed: {error}"
-        ))),
-    }
-}
-
-/// Reloads historical orders directly from `data/orders.csv`.
-pub async fn reload_orders_from_file(
-    State(state): State<WebState>,
-    headers: HeaderMap,
-) -> Json<ApiResponse<usize>> {
-    if !is_admin_authenticated(&state, &headers) {
-        return Json(ApiResponse::error("Admin login required."));
-    }
-    match load_orders(ORDERS_PATH) {
-        Ok(orders) if orders.is_empty() => {
-            Json(ApiResponse::error("data/orders.csv contained no orders."))
-        }
-        Ok(orders) => {
-            let count = state.replace_historical_orders_from_csv(orders);
-            Json(ApiResponse::ok(
-                format!("Reloaded {count} historical order record(s) from {ORDERS_PATH}."),
-                Some(count),
-            ))
-        }
-        Err(error) => Json(ApiResponse::error(format!(
-            "Reload from {ORDERS_PATH} failed: {error}"
-        ))),
-    }
-}
-
 /// Downloads the current in-memory dishes as CSV.
 pub async fn export_dishes_csv(State(state): State<WebState>, headers: HeaderMap) -> Response {
     if !is_admin_authenticated(&state, &headers) {
@@ -536,35 +408,6 @@ pub struct AvailabilityRequest {
     pub available: bool,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct CsvImportRequest {
-    pub csv: String,
-    #[serde(default)]
-    pub mode: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum ImportMode {
-    Replace,
-    Merge,
-}
-
-impl ImportMode {
-    fn from_value(value: Option<&str>) -> Self {
-        match value.unwrap_or_default().trim().to_lowercase().as_str() {
-            "merge" => Self::Merge,
-            _ => Self::Replace,
-        }
-    }
-
-    fn past_tense_label(self) -> &'static str {
-        match self {
-            Self::Replace => "Imported",
-            Self::Merge => "Merged",
-        }
-    }
-}
-
 fn is_admin_authenticated(state: &WebState, headers: &HeaderMap) -> bool {
     admin_session_id_from_headers(headers)
         .is_some_and(|session_id| state.is_admin_session(&session_id))
@@ -575,29 +418,19 @@ pub(crate) fn is_admin_authenticated_for_handlers(state: &WebState, headers: &He
 }
 
 fn admin_session_id_from_headers(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get(COOKIE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|cookies| {
-            cookies.split(';').find_map(|cookie| {
-                let (name, value) = cookie.trim().split_once('=')?;
-                (name == ADMIN_SESSION_COOKIE).then(|| value.to_string())
-            })
-        })
+    crate::web::session::cookie_value(headers, ADMIN_SESSION_COOKIE)
 }
 
 fn admin_session_cookie(session_id: &str) -> String {
-    format!(
-        "{ADMIN_SESSION_COOKIE}={session_id}; HttpOnly; SameSite=Lax; Path=/; Max-Age={ADMIN_SESSION_MAX_AGE_SECONDS}{}",
-        super::customer::secure_cookie_attribute()
+    crate::web::session::session_cookie(
+        ADMIN_SESSION_COOKIE,
+        session_id,
+        ADMIN_SESSION_MAX_AGE_SECONDS,
     )
 }
 
 fn expired_admin_session_cookie() -> String {
-    format!(
-        "{ADMIN_SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0{}",
-        super::customer::secure_cookie_attribute()
-    )
+    crate::web::session::expired_session_cookie(ADMIN_SESSION_COOKIE)
 }
 
 fn admin_credentials() -> Result<(String, String), &'static str> {
@@ -606,12 +439,6 @@ fn admin_credentials() -> Result<(String, String), &'static str> {
     match (username, password) {
         (Some(username), Some(password)) if !username.trim().is_empty() && !password.is_empty() => {
             Ok((username.trim().to_string(), password))
-        }
-        (None, None) if cfg!(debug_assertions) => {
-            println!(
-                "ADMIN_USERNAME and ADMIN_PASSWORD are unset; using documented local debug credentials."
-            );
-            Ok(("admin".to_string(), "admin".to_string()))
         }
         _ => Err("Admin credentials are not configured on the server."),
     }
@@ -661,6 +488,7 @@ mod tests {
     use super::*;
     use axum::body::to_bytes;
     use axum::http::HeaderValue;
+    use axum::http::header::COOKIE;
 
     fn login(username: &str, password: &str) -> AdminLoginRequest {
         AdminLoginRequest {
@@ -756,7 +584,9 @@ mod tests {
     #[tokio::test]
     async fn admin_logout_expires_only_admin_cookie() {
         let state = WebState::new(Vec::new(), Vec::new());
-        let session_id = state.create_admin_session();
+        let session_id = state
+            .create_admin_session()
+            .expect("OS randomness should create an admin test session");
         let mut headers = HeaderMap::new();
         headers.insert(
             COOKIE,

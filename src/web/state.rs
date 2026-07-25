@@ -25,17 +25,20 @@ use crate::recommender::learning_timeline::{
 };
 use crate::recommender::meal_set::{MealSetInput, MealSetRecommendation, recommend_meal_sets};
 use crate::search::{MatchMode, build_search_vocabulary, search_dishes};
+use crate::web::session::generate_session_id;
+use crate::web::validation::{
+    customer_name as validate_customer_name, customer_phone as normalize_phone,
+    masked_phone_suffix, optional_short_text as clean_optional_short,
+    table_number as validate_table_number,
+};
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
-use std::time::Instant;
 
 /// Local folder served by Axum under `/assets/dishes`.
 const DISH_IMAGE_DIR: &str = "assets/dishes";
-static SESSION_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 /// Shared application state used by Axum handlers.
 ///
@@ -514,82 +517,6 @@ impl WebState {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn evaluation_report(&self, request: EvaluationRequest) -> EvaluationResponse {
-        let start = Instant::now();
-        let dishes = self.available_dishes();
-        let all_orders = self.combined_orders();
-        let orders = match request.dataset_size.as_deref() {
-            Some("5") => all_orders.into_iter().take(5).collect::<Vec<_>>(),
-            Some("20") => all_orders.into_iter().take(20).collect::<Vec<_>>(),
-            _ => all_orders,
-        };
-        let preference = RecommendationRequest {
-            liked_ingredients: request.liked_ingredients,
-            disliked_ingredients: request.disliked_ingredients,
-            preferred_tags: request.preferred_tags,
-            selected_dish_ids: request.selected_dish_ids,
-            time_context: request.time_context,
-            ranking_method: Some("hybrid".to_string()),
-            diversity_mode: None,
-        }
-        .into_user_preference_or_default();
-
-        let static_results = dishes
-            .iter()
-            .take(5)
-            .map(|dish| EvaluationRecommendation {
-                dish_id: dish.dish_id.clone(),
-                dish_name: dish.name.clone(),
-                score: 0.0,
-                reason: "Static menu order baseline.".to_string(),
-            })
-            .collect::<Vec<_>>();
-        let content_results = evaluation_method_results(
-            &dishes,
-            &orders,
-            &preference,
-            "content-based",
-            |mut pref| {
-                pref.ranking_method = Some("content-based".to_string());
-                pref
-            },
-        );
-        let co_order_results =
-            evaluation_method_results(&dishes, &orders, &preference, "co-ordering", |mut pref| {
-                pref.ranking_method = Some("co-ordering".to_string());
-                pref
-            });
-        let popularity_results =
-            evaluation_method_results(&dishes, &orders, &preference, "popularity", |mut pref| {
-                pref.liked_ingredients.clear();
-                pref.preferred_tags.clear();
-                pref.selected_dish_ids.clear();
-                pref.ranking_method = Some("co-ordering".to_string());
-                pref
-            });
-        let hybrid_results =
-            evaluation_method_results(&dishes, &orders, &preference, "hybrid", |mut pref| {
-                pref.ranking_method = Some("hybrid".to_string());
-                pref
-            });
-        let methods = vec![
-            EvaluationMethodOutput::new("Static", static_results, &dishes),
-            EvaluationMethodOutput::new("Content-Based", content_results, &dishes),
-            EvaluationMethodOutput::new("Co-Ordering", co_order_results, &dishes),
-            EvaluationMethodOutput::new("Popularity", popularity_results, &dishes),
-            EvaluationMethodOutput::new("Hybrid", hybrid_results, &dishes),
-        ];
-        EvaluationResponse {
-            dataset_size: orders.len(),
-            dish_count: dishes.len(),
-            unique_co_order_pairs: count_unique_pairs(&orders),
-            average_dishes_per_order: average_dishes_per_order(&orders),
-            response_time_ms: start.elapsed().as_millis(),
-            methods,
-        }
-    }
-
     /// Runs an in-memory co-order simulation for the admin Recommendation
     /// Tester. Generated baskets are combined with the current historical
     /// orders only for this response; real `data/orders.csv` is never modified.
@@ -714,17 +641,34 @@ impl WebState {
             .into_iter()
             .take(top_k)
             .enumerate()
-            .map(|(index, item)| ExperimentRow {
-                method: "Before (no preferences)".to_string(),
-                rank: Some(index + 1),
-                dish_id: item.dish.dish_id,
-                dish_name: item.dish.name,
-                ingredient_score: item.ingredient_score,
-                co_order_score: 0.0,
-                final_score: item.ingredient_score,
-                matched: item.matched_liked_ingredients.join(", "),
-                excluded: "-".to_string(),
-                hidden_match: false,
+            .map(|(index, item)| {
+                // A baseline dish can leave Top-K because stronger preference
+                // matches replaced it, not only because it violated a hard
+                // restriction. Record the actual conflict so the browser can
+                // distinguish "Excluded" from ordinary rank movement.
+                let conflicts = item
+                    .dish
+                    .ingredients
+                    .iter()
+                    .filter(|ingredient| disliked.contains(&ingredient.to_lowercase()))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                ExperimentRow {
+                    method: "Before (no preferences)".to_string(),
+                    rank: Some(index + 1),
+                    dish_id: item.dish.dish_id,
+                    dish_name: item.dish.name,
+                    ingredient_score: item.ingredient_score,
+                    co_order_score: 0.0,
+                    final_score: item.ingredient_score,
+                    matched: item.matched_liked_ingredients.join(", "),
+                    excluded: if conflicts.is_empty() {
+                        "-".to_string()
+                    } else {
+                        format!("Disliked ingredient: {}", conflicts.join(", "))
+                    },
+                    hidden_match: false,
+                }
             })
             .collect::<Vec<_>>();
         rows.extend(
@@ -1048,7 +992,7 @@ impl WebState {
         let customer_name = validate_customer_name(&request.customer_name)?;
         let customer_phone = normalize_phone(&request.customer_phone)?;
         let table_number = validate_table_number(&request.table_number)?;
-        let session_id = new_opaque_session_id("customer");
+        let session_id = generate_session_id("customer")?;
         let session = CustomerSession {
             session_id: session_id.clone(),
             customer_name,
@@ -1105,13 +1049,13 @@ impl WebState {
     ///
     /// Admin sessions are stored separately from customer dining sessions so
     /// staff login and logout can never overwrite a customer's session.
-    pub fn create_admin_session(&self) -> String {
-        let session_id = new_opaque_session_id("admin");
+    pub fn create_admin_session(&self) -> Result<String, String> {
+        let session_id = generate_session_id("admin")?;
         self.admin_sessions
             .write()
             .expect("admin sessions lock poisoned")
             .insert(session_id.clone());
-        session_id
+        Ok(session_id)
     }
 
     /// Returns whether an admin cookie refers to a currently active session.
@@ -1395,14 +1339,27 @@ impl WebState {
         Ok(())
     }
 
-    /// Finds one live/session order for the customer order tracking page.
-    pub fn order_by_id(&self, order_id: &str) -> Option<LiveOrder> {
-        self.live_orders
+    /// Finds an order only when it belongs to the authenticated customer.
+    ///
+    /// Live order IDs are intentionally human-readable for staff. Ownership
+    /// must therefore be checked with the server-side customer session instead
+    /// of treating knowledge of an order ID as authorization.
+    pub fn customer_order_by_id(
+        &self,
+        order_id: &str,
+        customer_phone: &str,
+    ) -> Result<Option<LiveOrder>, String> {
+        let customer_phone = normalize_phone(customer_phone)?;
+        Ok(self
+            .live_orders
             .read()
             .expect("live orders lock poisoned")
             .iter()
-            .find(|order| order.order_id.eq_ignore_ascii_case(order_id))
-            .cloned()
+            .find(|order| {
+                order.order_id.eq_ignore_ascii_case(order_id)
+                    && order.customer_phone == customer_phone
+            })
+            .cloned())
     }
 
     /// Returns all live/session orders for the customer Orders page.
@@ -1576,52 +1533,6 @@ impl WebState {
             unavailable.insert(dish_id);
         }
         Ok(())
-    }
-
-    /// Replaces the in-memory dish list with imported CSV dish data.
-    pub fn replace_dishes_from_csv(&self, dishes: Vec<Dish>) -> usize {
-        let count = dishes.len();
-        *self.dishes.write().expect("dishes lock poisoned") = dishes;
-        self.unavailable_dish_ids
-            .write()
-            .expect("availability lock poisoned")
-            .clear();
-        count
-    }
-
-    /// Merges imported dishes into the in-memory menu by `dish_id`.
-    ///
-    /// Existing records are replaced and new records are appended. This gives
-    /// staff a safer CSV workflow when they only want to update part of the menu
-    /// instead of replacing the whole dataset.
-    pub fn merge_dishes_from_csv(&self, imported: Vec<Dish>) -> usize {
-        let count = imported.len();
-        let mut dishes = self.dishes.write().expect("dishes lock poisoned");
-        for imported_dish in imported {
-            if let Some(existing) = dishes
-                .iter_mut()
-                .find(|dish| dish.dish_id == imported_dish.dish_id)
-            {
-                *existing = imported_dish;
-            } else {
-                dishes.push(imported_dish);
-            }
-        }
-        count
-    }
-
-    /// Replaces historical order logs in memory after admin CSV import.
-    ///
-    /// Live customer checkout orders are intentionally not touched because they
-    /// represent the current browser session demo, while historical orders are
-    /// the dataset used to rebuild collaborative filtering evidence.
-    pub fn replace_historical_orders_from_csv(&self, orders: Vec<Order>) -> usize {
-        let count = orders.len();
-        *self
-            .historical_orders
-            .write()
-            .expect("historical orders lock poisoned") = orders;
-        count
     }
 
     /// Returns the current dish models for CSV export.
@@ -2202,86 +2113,6 @@ pub struct AdminInsightResponse {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[allow(dead_code)]
-pub struct EvaluationRequest {
-    #[serde(default)]
-    pub dataset_size: Option<String>,
-    #[serde(default)]
-    pub liked_ingredients: Vec<String>,
-    #[serde(default)]
-    pub disliked_ingredients: Vec<String>,
-    #[serde(default)]
-    pub preferred_tags: Vec<String>,
-    #[serde(default)]
-    pub selected_dish_ids: Vec<String>,
-    #[serde(default)]
-    pub time_context: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[allow(dead_code)]
-pub struct EvaluationResponse {
-    pub dataset_size: usize,
-    pub dish_count: usize,
-    pub unique_co_order_pairs: usize,
-    pub average_dishes_per_order: f32,
-    pub response_time_ms: u128,
-    pub methods: Vec<EvaluationMethodOutput>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[allow(dead_code)]
-pub struct EvaluationMethodOutput {
-    pub method: String,
-    pub recommendations: Vec<EvaluationRecommendation>,
-    pub diversity: f32,
-    pub coverage: f32,
-    pub novelty_proxy: f32,
-}
-
-impl EvaluationMethodOutput {
-    #[allow(dead_code)]
-    fn new(method: &str, recommendations: Vec<EvaluationRecommendation>, dishes: &[Dish]) -> Self {
-        let top_n = recommendations.len().max(1) as f32;
-        let recommended_ids = recommendations
-            .iter()
-            .map(|item| item.dish_id.clone())
-            .collect::<HashSet<_>>();
-        let categories = dishes
-            .iter()
-            .filter(|dish| recommended_ids.contains(&dish.dish_id))
-            .map(|dish| dish.category.clone())
-            .collect::<HashSet<_>>();
-        let coverage = if dishes.is_empty() {
-            0.0
-        } else {
-            (recommended_ids.len() as f32 / dishes.len() as f32) * 100.0
-        };
-        let novelty_proxy = recommendations
-            .iter()
-            .filter(|item| item.reason.to_lowercase().contains("popular"))
-            .count();
-
-        Self {
-            method: method.to_string(),
-            recommendations,
-            diversity: categories.len() as f32 / top_n,
-            coverage,
-            novelty_proxy: 1.0 - (novelty_proxy as f32 / top_n),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[allow(dead_code)]
-pub struct EvaluationRecommendation {
-    pub dish_id: String,
-    pub dish_name: String,
-    pub score: f32,
-    pub reason: String,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
 pub struct SimulationRequest {
     #[serde(default)]
     pub order_count: usize,
@@ -2617,7 +2448,7 @@ fn placeholder_price_amount(dish_id: &str) -> u32 {
 /// Resolves the local image URL for web rendering.
 ///
 /// Runtime never hotlinks external images. The lookup mirrors the previous
-/// desktop prototype: explicit `image_path`, then `assets/dishes/{dish_id}` with
+/// earlier prototype: explicit `image_path`, then `assets/dishes/{dish_id}` with
 /// jpg/png/jpeg fallbacks. The returned value is a URL under Axum's `/assets`
 /// static service.
 fn dish_image_url(dish: &Dish) -> Option<String> {
@@ -2867,146 +2698,6 @@ fn numeric_total(total: &str) -> u32 {
         .unwrap_or(0)
 }
 
-fn validate_customer_name(value: &str) -> Result<String, String> {
-    let value = value.trim();
-    if value.len() < 2 {
-        return Err("Customer name is required.".to_string());
-    }
-    if value.len() > 60 {
-        return Err("Customer name is too long.".to_string());
-    }
-    Ok(value.to_string())
-}
-
-/// Generates an opaque, cookie-safe identifier without exposing customer or
-/// staff details. The timestamp and process-local sequence avoid collisions in
-/// this lightweight in-memory prototype.
-fn new_opaque_session_id(kind: &str) -> String {
-    let sequence = SESSION_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    format!(
-        "{kind}-{:x}-{sequence:x}",
-        Local::now().timestamp_nanos_opt().unwrap_or_default()
-    )
-}
-
-#[allow(dead_code)]
-pub fn normalize_customer_phone(value: &str) -> Result<String, String> {
-    normalize_phone(value)
-}
-
-fn normalize_phone(value: &str) -> Result<String, String> {
-    let raw = value.trim().replace([' ', '-'], "");
-    let digits = if let Some(rest) = raw.strip_prefix("+60") {
-        format!("60{rest}")
-    } else if let Some(rest) = raw.strip_prefix('0') {
-        format!("60{rest}")
-    } else {
-        raw
-    };
-
-    if digits.len() < 10 || digits.len() > 13 || !digits.chars().all(|c| c.is_ascii_digit()) {
-        return Err("Enter a valid Malaysian phone number.".to_string());
-    }
-    Ok(digits)
-}
-
-fn validate_table_number(value: &str) -> Result<String, String> {
-    let value = value.trim().to_uppercase();
-    if value.is_empty() {
-        return Err("Table number is required for this dine-in prototype.".to_string());
-    }
-    if value.len() > 16 {
-        return Err("Table number is too long.".to_string());
-    }
-    if !value
-        .chars()
-        .all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_')
-    {
-        return Err("Table number can use letters, numbers, dash, or underscore only.".to_string());
-    }
-    Ok(value)
-}
-
-fn clean_optional_short(
-    value: &Option<String>,
-    max_len: usize,
-    label: &str,
-) -> Result<Option<String>, String> {
-    let Some(value) = value
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(None);
-    };
-    if value.len() > max_len {
-        return Err(format!("{label} is too long."));
-    }
-    Ok(Some(value.to_string()))
-}
-
-fn masked_phone_suffix(phone: &str) -> String {
-    phone
-        .chars()
-        .rev()
-        .take(4)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect()
-}
-
-#[allow(dead_code)]
-fn evaluation_method_results(
-    dishes: &[Dish],
-    orders: &[Order],
-    preference: &UserPreference,
-    _method: &str,
-    configure: impl FnOnce(UserPreference) -> UserPreference,
-) -> Vec<EvaluationRecommendation> {
-    let output = generate_recommendations(dishes, orders, &configure(preference.clone()));
-    output
-        .recommendations
-        .into_iter()
-        .take(5)
-        .map(|item| EvaluationRecommendation {
-            dish_id: item.dish.dish_id,
-            dish_name: item.dish.name,
-            score: item.final_score,
-            reason: item.explanation,
-        })
-        .collect()
-}
-
-#[allow(dead_code)]
-fn count_unique_pairs(orders: &[Order]) -> usize {
-    let mut pairs = HashSet::new();
-    for order in orders {
-        let mut ids = order.ordered_dishes.clone();
-        ids.sort();
-        ids.dedup();
-        for i in 0..ids.len() {
-            for j in (i + 1)..ids.len() {
-                pairs.insert((ids[i].clone(), ids[j].clone()));
-            }
-        }
-    }
-    pairs.len()
-}
-
-#[allow(dead_code)]
-fn average_dishes_per_order(orders: &[Order]) -> f32 {
-    if orders.is_empty() {
-        0.0
-    } else {
-        orders
-            .iter()
-            .map(|order| order.ordered_dishes.len())
-            .sum::<usize>() as f32
-            / orders.len() as f32
-    }
-}
-
 fn generate_simulated_orders(
     dishes: &[Dish],
     historical_orders: &[Order],
@@ -3042,11 +2733,12 @@ fn generate_simulated_orders(
         .map(|index| {
             let target_size = rng.range(min_dishes, max_dishes);
             let mut basket = Vec::new();
-            if let (Some(a), Some(b)) = (&forced_a, &forced_b) {
-                if a != b && rng.range(1, 100) <= pair_probability {
-                    basket.push(a.clone());
-                    basket.push(b.clone());
-                }
+            if let (Some(a), Some(b)) = (&forced_a, &forced_b)
+                && a != b
+                && rng.range(1, 100) <= pair_probability
+            {
+                basket.push(a.clone());
+                basket.push(b.clone());
             }
             while basket.len() < target_size {
                 let candidate = choose_simulated_dish(
@@ -4053,6 +3745,18 @@ mod tests {
                 .rows
                 .iter()
                 .any(|row| row.method == "After (selected preferences)")
+        );
+        assert!(result.rows.iter().any(|row| {
+            row.dish_id == "D03"
+                && row.method == "Before (no preferences)"
+                && row.excluded.contains("beef")
+        }));
+        assert!(
+            result
+                .rows
+                .iter()
+                .filter(|row| row.dish_id != "D03")
+                .all(|row| row.method != "Before (no preferences)" || row.excluded == "-")
         );
         assert!(result.conclusion.contains("excluded"));
     }

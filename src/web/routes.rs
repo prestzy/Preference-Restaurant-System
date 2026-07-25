@@ -27,7 +27,7 @@ pub fn router(state: WebState) -> Router {
             "/admin/login",
             get(handlers::admin::admin_login_page).post(handlers::admin::admin_login_submit),
         )
-        .route("/admin/logout", get(handlers::admin::admin_logout))
+        .route("/admin/logout", post(handlers::admin::admin_logout))
         .route("/admin", get(handlers::admin::admin_page))
         .route("/admin/orders", get(handlers::admin::admin_orders_page))
         .route("/admin/dishes", get(handlers::admin::admin_dishes_page))
@@ -39,7 +39,6 @@ pub fn router(state: WebState) -> Router {
             "/admin/evaluation",
             get(handlers::admin::admin_evaluation_page),
         )
-        .route("/admin/maintenance", get(handlers::admin::admin_data_page))
         .route("/admin/insights", get(handlers::admin::admin_insights_page))
         .route("/api/orders", post(handlers::cart::create_order))
         .route("/api/orders/my", get(handlers::orders::my_orders))
@@ -89,36 +88,18 @@ pub fn router(state: WebState) -> Router {
         .route("/api/admin/orders", get(handlers::admin::admin_orders_sync))
         .route(
             "/api/admin/orders/:order_id/status",
-            post(handlers::admin::update_order_status),
+            axum::routing::patch(handlers::admin::update_order_status),
         )
         .route("/api/admin/dishes", post(handlers::admin::upsert_dish))
         .route(
             "/api/admin/dishes/:dish_id",
-            get(handlers::admin::get_dish).put(handlers::admin::update_dish),
-        )
-        .route(
-            "/api/admin/dishes/:dish_id/delete",
-            post(handlers::admin::delete_dish),
+            get(handlers::admin::get_dish)
+                .put(handlers::admin::update_dish)
+                .delete(handlers::admin::delete_dish),
         )
         .route(
             "/api/admin/dishes/:dish_id/availability",
-            post(handlers::admin::set_dish_availability),
-        )
-        .route(
-            "/api/admin/import/dishes",
-            post(handlers::admin::import_dishes_csv),
-        )
-        .route(
-            "/api/admin/reload/dishes",
-            post(handlers::admin::reload_dishes_from_file),
-        )
-        .route(
-            "/api/admin/import/orders",
-            post(handlers::admin::import_orders_csv),
-        )
-        .route(
-            "/api/admin/reload/orders",
-            post(handlers::admin::reload_orders_from_file),
+            axum::routing::patch(handlers::admin::set_dish_availability),
         )
         .route(
             "/admin/export/dishes.csv",
