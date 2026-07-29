@@ -155,7 +155,8 @@ separately before making any service-level claim.
 
 Run a relative-link checker or manually verify every Markdown link. Confirm:
 
-- no default credentials are documented;
+- the `admin` / `admin` FYP demo default and production override warning agree
+  across the README, developer guide, and code;
 - no fake screenshots or coverage badges;
 - no accuracy/probability claim is attached to evidence confidence;
 - deleted desktop modules are not described as active;

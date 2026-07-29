@@ -54,12 +54,30 @@ pub(crate) fn session_cookie(name: &str, value: &str, max_age_seconds: u32) -> S
     )
 }
 
+/// Builds a partitioned cookie for embedded mobile-preview webviews.
+///
+/// Real phones and normal browser tabs use the first-party `SameSite=Lax`
+/// cookie above. Some IDE preview extensions render localhost inside a
+/// cross-site frame, where that cookie may not be replayed. CHIPS-capable
+/// browsers can use this separate `Secure; SameSite=None; Partitioned` cookie
+/// without changing the normal local-network cookie policy.
+pub(crate) fn partitioned_session_cookie(name: &str, value: &str, max_age_seconds: u32) -> String {
+    format!(
+        "{name}={value}; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age={max_age_seconds}"
+    )
+}
+
 /// Expires one named session cookie without affecting the other user role.
 pub(crate) fn expired_session_cookie(name: &str) -> String {
     format!(
         "{name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0{}",
         secure_cookie_attribute()
     )
+}
+
+/// Expires the optional partitioned preview cookie.
+pub(crate) fn expired_partitioned_session_cookie(name: &str) -> String {
+    format!("{name}=; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=0")
 }
 
 /// Local HTTP remains usable by default; HTTPS deployments opt into `Secure`.
@@ -94,5 +112,17 @@ mod tests {
                 .chars()
                 .all(|character| character.is_ascii_alphanumeric() || character == '-')
         );
+    }
+
+    #[test]
+    fn partitioned_cookie_supports_embedded_preview_without_weakening_http_only() {
+        let cookie = partitioned_session_cookie("customer_preview_session", "opaque", 60);
+
+        assert!(cookie.starts_with("customer_preview_session=opaque"));
+        assert!(cookie.contains("HttpOnly"));
+        assert!(cookie.contains("Secure"));
+        assert!(cookie.contains("SameSite=None"));
+        assert!(cookie.contains("Partitioned"));
+        assert!(cookie.contains("Path=/"));
     }
 }

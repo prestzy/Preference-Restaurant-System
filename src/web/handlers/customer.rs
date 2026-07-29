@@ -2,12 +2,13 @@ use crate::web::state::{CustomerRegistrationRequest, CustomerSession, WebState};
 use crate::web::templates;
 use axum::Form;
 use axum::extract::State;
-use axum::http::header::{LOCATION, SET_COOKIE};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::header::{CACHE_CONTROL, LOCATION, SET_COOKIE};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
 pub const CUSTOMER_SESSION_COOKIE: &str = "customer_session";
+const CUSTOMER_PREVIEW_SESSION_COOKIE: &str = "customer_preview_session";
 const CUSTOMER_SESSION_MAX_AGE_SECONDS: u32 = 8 * 60 * 60;
 
 /// Shows the temporary customer registration page.
@@ -31,15 +32,20 @@ pub async fn start_submit(
     match state.register_customer_session(payload.clone().into_request()) {
         Ok(session) => {
             println!("Customer validation succeeded; customer session created.");
+            let mut headers = HeaderMap::new();
+            append_customer_session_cookies(&mut headers, &session.session_id);
+            headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+
+            // Render the menu in this successful response instead of requiring
+            // an immediate POST -> redirect cookie round trip. Embedded mobile
+            // preview frames can otherwise return to `/start` before replaying
+            // the newly issued cookie. The menu shell replaces the visible URL
+            // with `/`, while normal navigation continues to use the cookie.
+            let view = state.menu_view();
             (
-                StatusCode::SEE_OTHER,
-                [
-                    (LOCATION, "/"),
-                    (
-                        SET_COOKIE,
-                        customer_session_cookie(&session.session_id).as_str(),
-                    ),
-                ],
+                StatusCode::OK,
+                headers,
+                Html(templates::customer_menu_page(&view, &session)),
             )
                 .into_response()
         }
@@ -104,14 +110,19 @@ pub async fn end_session(State(state): State<WebState>, headers: HeaderMap) -> R
     if let Some(session_id) = customer_session_id_from_headers(&headers) {
         state.clear_customer_session(&session_id);
     }
-    (
-        StatusCode::SEE_OTHER,
-        [
-            (LOCATION, "/start"),
-            (SET_COOKIE, expired_customer_session_cookie().as_str()),
-        ],
-    )
-        .into_response()
+    let mut response_headers = HeaderMap::new();
+    response_headers.append(
+        SET_COOKIE,
+        HeaderValue::from_str(&expired_customer_session_cookie())
+            .expect("customer cookie expiry is a valid HTTP header"),
+    );
+    response_headers.append(
+        SET_COOKIE,
+        HeaderValue::from_str(&expired_customer_preview_session_cookie())
+            .expect("customer preview cookie expiry is a valid HTTP header"),
+    );
+    response_headers.insert(LOCATION, HeaderValue::from_static("/start"));
+    (StatusCode::SEE_OTHER, response_headers).into_response()
 }
 
 pub fn current_customer_session(state: &WebState, headers: &HeaderMap) -> Option<CustomerSession> {
@@ -121,6 +132,7 @@ pub fn current_customer_session(state: &WebState, headers: &HeaderMap) -> Option
 
 pub fn customer_session_id_from_headers(headers: &HeaderMap) -> Option<String> {
     crate::web::session::cookie_value(headers, CUSTOMER_SESSION_COOKIE)
+        .or_else(|| crate::web::session::cookie_value(headers, CUSTOMER_PREVIEW_SESSION_COOKIE))
 }
 
 pub(crate) fn customer_session_cookie(session_id: &str) -> String {
@@ -131,8 +143,33 @@ pub(crate) fn customer_session_cookie(session_id: &str) -> String {
     )
 }
 
+fn customer_preview_session_cookie(session_id: &str) -> String {
+    crate::web::session::partitioned_session_cookie(
+        CUSTOMER_PREVIEW_SESSION_COOKIE,
+        session_id,
+        CUSTOMER_SESSION_MAX_AGE_SECONDS,
+    )
+}
+
+fn append_customer_session_cookies(headers: &mut HeaderMap, session_id: &str) {
+    headers.append(
+        SET_COOKIE,
+        HeaderValue::from_str(&customer_session_cookie(session_id))
+            .expect("customer session cookie is a valid HTTP header"),
+    );
+    headers.append(
+        SET_COOKIE,
+        HeaderValue::from_str(&customer_preview_session_cookie(session_id))
+            .expect("customer preview session cookie is a valid HTTP header"),
+    );
+}
+
 fn expired_customer_session_cookie() -> String {
     crate::web::session::expired_session_cookie(CUSTOMER_SESSION_COOKIE)
+}
+
+fn expired_customer_preview_session_cookie() -> String {
+    crate::web::session::expired_partitioned_session_cookie(CUSTOMER_PREVIEW_SESSION_COOKIE)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -175,24 +212,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn valid_registration_redirects_sets_cookie_and_unlocks_home() {
+    async fn valid_registration_returns_menu_sets_cookies_and_unlocks_home() {
         let state = WebState::new(Vec::new(), Vec::new());
         let response = start_submit(State(state.clone()), Form(valid_form())).await;
 
-        assert_eq!(response.status(), StatusCode::SEE_OTHER);
-        assert_eq!(response.headers().get(LOCATION).unwrap(), "/");
-        let set_cookie = response
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.headers().get(LOCATION).is_none());
+        let set_cookies = response
             .headers()
-            .get(SET_COOKIE)
-            .unwrap()
-            .to_str()
-            .unwrap();
+            .get_all(SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(set_cookies.len(), 2);
+        let set_cookie = set_cookies[0];
         assert!(set_cookie.starts_with("customer_session="));
         assert!(set_cookie.contains("HttpOnly"));
         assert!(set_cookie.contains("SameSite=Lax"));
         assert!(set_cookie.contains("Path=/"));
         assert!(set_cookie.contains("Max-Age="));
         assert!(!set_cookie.contains("Secure"));
+        assert!(set_cookies[1].starts_with("customer_preview_session="));
+        assert!(set_cookies[1].contains("SameSite=None"));
+        assert!(set_cookies[1].contains("Partitioned"));
+        assert!(set_cookies[1].contains("Secure"));
 
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -202,6 +245,20 @@ mod tests {
         assert!(current_customer_session(&state, &headers).is_some());
         let home = crate::web::handlers::menu::customer_menu(State(state), headers).await;
         assert_eq!(home.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn preview_cookie_can_resolve_customer_session_id() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            COOKIE,
+            HeaderValue::from_static("customer_preview_session=preview-token"),
+        );
+
+        assert_eq!(
+            customer_session_id_from_headers(&headers).as_deref(),
+            Some("preview-token")
+        );
     }
 
     #[tokio::test]

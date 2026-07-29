@@ -242,16 +242,12 @@ dish references. Details are in [Data Model](docs/data-model.md).
 PowerShell:
 
 ```powershell
-$env:ADMIN_USERNAME="admin"
-$env:ADMIN_PASSWORD="admin"
 cargo run
 ```
 
 Bash:
 
 ```bash
-ADMIN_USERNAME=admin \
-ADMIN_PASSWORD='admin' \
 cargo run
 ```
 
@@ -260,8 +256,8 @@ Open:
 - Customer: <http://127.0.0.1:3000/>
 - Admin: <http://127.0.0.1:3000/admin>
 
-There are deliberately no default admin credentials. Missing credentials produce
-a configuration error instead of an insecure fallback.
+The FYP demo defaults to username `admin` and password `admin`. Set both admin
+environment variables before `cargo run` to override the demo credentials.
 
 Optional configuration:
 
@@ -269,8 +265,8 @@ Optional configuration:
 |---|---|---|
 | `APP_HOST` | `127.0.0.1` | Bind address |
 | `APP_PORT` | `3000` | Server port |
-| `ADMIN_USERNAME` | none | Required admin username |
-| `ADMIN_PASSWORD` | none | Required admin password |
+| `ADMIN_USERNAME` | `admin` | Override the demo admin username |
+| `ADMIN_PASSWORD` | `admin` | Override the demo admin password |
 | `APP_COOKIE_SECURE` | unset | Set truthy when served over HTTPS |
 
 ## Phone and LAN Testing

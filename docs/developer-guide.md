@@ -12,8 +12,6 @@
 ```powershell
 git clone https://github.com/prestzy/Preference-Restaurant-System.git
 cd Preference-Restaurant-System
-$env:ADMIN_USERNAME="restaurant-admin"
-$env:ADMIN_PASSWORD="choose-a-long-local-password"
 cargo run
 ```
 
@@ -24,14 +22,15 @@ is required.
 
 | Environment variable | Requirement |
 |---|---|
-| `ADMIN_USERNAME` | Required to log in as staff |
-| `ADMIN_PASSWORD` | Required; never commit it |
+| `ADMIN_USERNAME` | Optional override; demo default is `admin` |
+| `ADMIN_PASSWORD` | Optional override; demo default is `admin` |
 | `APP_HOST` | Optional, default `127.0.0.1` |
 | `APP_PORT` | Optional, default `3000` |
 | `APP_COOKIE_SECURE` | Enable when HTTPS terminates at the app |
 
-The project intentionally does not parse a `.env` file. Set variables in the
-process environment or deployment service.
+The project intentionally does not parse a `.env` file. Set overrides in the
+process environment or deployment service. Replace the `admin` / `admin` demo
+credentials whenever the app is exposed beyond a controlled FYP demonstration.
 
 ## Project Structure
 
@@ -80,7 +79,9 @@ Protect all `/api/admin/*` mutations with admin session validation.
 Customer and admin sessions are independent in-memory maps with different
 cookie names. Session identifiers come from the operating system random source.
 Use helpers in `web/session.rs`; do not create ad hoc cookies or predictable
-IDs. Customer order reads must remain ownership-scoped.
+IDs. Customer order reads must remain ownership-scoped. Embedded IDE previews
+also receive a separate HttpOnly, Secure, partitioned cookie; normal browsers
+and LAN phones continue using the first-party `SameSite=Lax` cookie.
 
 Restarting the process ends browser sessions and removes uncompleted in-memory
 orders. This is expected in the prototype.
@@ -171,7 +172,8 @@ fixtures.
 - Port access denied/busy: stop only the known process or set another
   `APP_PORT`; do not delete a running Windows executable.
 - Startup CSV error: read the contextual row/column message and validate IDs.
-- Admin configuration error: set both admin variables before launch.
+- Admin login issue: use `admin` / `admin` for the local demo, or verify both
+  environment overrides were set before launch.
 - Browser API failure: inspect Network and Console; `requestJson()` reports
   malformed and non-2xx responses.
 - Timeline warning: use protected Rebuild Timeline; historical orders remain
@@ -198,4 +200,3 @@ fixtures.
 - Avoid `unwrap`, `expect`, and `panic` in request/persistence paths.
 - Use semantic CSS tokens and 44px touch targets.
 - Keep search as a locator; the customer Menu must stay complete and static.
-

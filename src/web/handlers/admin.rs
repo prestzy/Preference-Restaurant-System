@@ -7,13 +7,16 @@ use crate::web::templates;
 use axum::Json;
 use axum::extract::{Form, Path, State};
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, LOCATION, SET_COOKIE};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use serde::{Deserialize, Serialize};
 use std::env;
 
 pub const ADMIN_SESSION_COOKIE: &str = "admin_session";
+const ADMIN_PREVIEW_SESSION_COOKIE: &str = "admin_preview_session";
 const ADMIN_SESSION_MAX_AGE_SECONDS: u32 = 12 * 60 * 60;
+const DEFAULT_ADMIN_USERNAME: &str = "admin";
+const DEFAULT_ADMIN_PASSWORD: &str = "admin";
 
 /// Renders the staff/admin dashboard.
 ///
@@ -65,13 +68,11 @@ fn process_admin_login(
                     .into_response();
             }
         };
-        let cookie = admin_session_cookie(&session_id);
+        let mut headers = HeaderMap::new();
+        append_admin_session_cookies(&mut headers, &session_id);
+        headers.insert(LOCATION, HeaderValue::from_static("/admin"));
         println!("Admin authentication succeeded; admin session created.");
-        return (
-            [(SET_COOKIE, cookie.as_str()), (LOCATION, "/admin")],
-            StatusCode::SEE_OTHER,
-        )
-            .into_response();
+        return (headers, StatusCode::SEE_OTHER).into_response();
     }
 
     println!("Admin authentication failed.");
@@ -89,12 +90,19 @@ pub async fn admin_logout(State(state): State<WebState>, headers: HeaderMap) -> 
     if let Some(session_id) = admin_session_id_from_headers(&headers) {
         state.clear_admin_session(&session_id);
     }
-    (
-        [(SET_COOKIE, expired_admin_session_cookie().as_str())],
-        [(LOCATION, "/admin/login")],
-        StatusCode::SEE_OTHER,
-    )
-        .into_response()
+    let mut response_headers = HeaderMap::new();
+    response_headers.append(
+        SET_COOKIE,
+        HeaderValue::from_str(&expired_admin_session_cookie())
+            .expect("admin cookie expiry is a valid HTTP header"),
+    );
+    response_headers.append(
+        SET_COOKIE,
+        HeaderValue::from_str(&expired_admin_preview_session_cookie())
+            .expect("admin preview cookie expiry is a valid HTTP header"),
+    );
+    response_headers.insert(LOCATION, HeaderValue::from_static("/admin/login"));
+    (response_headers, StatusCode::SEE_OTHER).into_response()
 }
 
 pub async fn admin_page(State(state): State<WebState>, headers: HeaderMap) -> Response {
@@ -419,6 +427,7 @@ pub(crate) fn is_admin_authenticated_for_handlers(state: &WebState, headers: &He
 
 fn admin_session_id_from_headers(headers: &HeaderMap) -> Option<String> {
     crate::web::session::cookie_value(headers, ADMIN_SESSION_COOKIE)
+        .or_else(|| crate::web::session::cookie_value(headers, ADMIN_PREVIEW_SESSION_COOKIE))
 }
 
 fn admin_session_cookie(session_id: &str) -> String {
@@ -429,8 +438,33 @@ fn admin_session_cookie(session_id: &str) -> String {
     )
 }
 
+fn admin_preview_session_cookie(session_id: &str) -> String {
+    crate::web::session::partitioned_session_cookie(
+        ADMIN_PREVIEW_SESSION_COOKIE,
+        session_id,
+        ADMIN_SESSION_MAX_AGE_SECONDS,
+    )
+}
+
+fn append_admin_session_cookies(headers: &mut HeaderMap, session_id: &str) {
+    headers.append(
+        SET_COOKIE,
+        HeaderValue::from_str(&admin_session_cookie(session_id))
+            .expect("admin session cookie is a valid HTTP header"),
+    );
+    headers.append(
+        SET_COOKIE,
+        HeaderValue::from_str(&admin_preview_session_cookie(session_id))
+            .expect("admin preview session cookie is a valid HTTP header"),
+    );
+}
+
 fn expired_admin_session_cookie() -> String {
     crate::web::session::expired_session_cookie(ADMIN_SESSION_COOKIE)
+}
+
+fn expired_admin_preview_session_cookie() -> String {
+    crate::web::session::expired_partitioned_session_cookie(ADMIN_PREVIEW_SESSION_COOKIE)
 }
 
 fn admin_credentials() -> Result<(String, String), &'static str> {
@@ -440,7 +474,12 @@ fn admin_credentials() -> Result<(String, String), &'static str> {
         (Some(username), Some(password)) if !username.trim().is_empty() && !password.is_empty() => {
             Ok((username.trim().to_string(), password))
         }
-        _ => Err("Admin credentials are not configured on the server."),
+        // The FYP prototype remains immediately demonstrable with admin/admin.
+        // Deployments can override both values through environment variables.
+        _ => Ok((
+            DEFAULT_ADMIN_USERNAME.to_string(),
+            DEFAULT_ADMIN_PASSWORD.to_string(),
+        )),
     }
 }
 
@@ -515,12 +554,14 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::SEE_OTHER);
         assert_eq!(response.headers().get(LOCATION).unwrap(), "/admin");
-        let set_cookie = response
+        let set_cookies = response
             .headers()
-            .get(SET_COOKIE)
-            .unwrap()
-            .to_str()
-            .unwrap();
+            .get_all(SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(set_cookies.len(), 2);
+        let set_cookie = set_cookies[0];
         assert!(set_cookie.starts_with("admin_session="));
         assert!(!set_cookie.starts_with("customer_session="));
         assert!(set_cookie.contains("HttpOnly"));
@@ -528,6 +569,8 @@ mod tests {
         assert!(set_cookie.contains("Path=/"));
         assert!(set_cookie.contains("Max-Age="));
         assert!(!set_cookie.contains("Secure"));
+        assert!(set_cookies[1].starts_with("admin_preview_session="));
+        assert!(set_cookies[1].contains("Partitioned"));
 
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -568,6 +611,20 @@ mod tests {
         assert!(body.contains("Admin credentials are not configured on the server."));
         assert!(body.contains(r#"value="staff""#));
         assert!(!body.contains(r#"value="secret""#));
+    }
+
+    #[test]
+    fn admin_preview_cookie_is_accepted_as_an_admin_session_id() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            COOKIE,
+            HeaderValue::from_static("admin_preview_session=preview-token"),
+        );
+
+        assert_eq!(
+            admin_session_id_from_headers(&headers).as_deref(),
+            Some("preview-token")
+        );
     }
 
     #[tokio::test]

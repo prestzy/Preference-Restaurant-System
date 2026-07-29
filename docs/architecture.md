@@ -201,7 +201,8 @@ assert that historical order count and timeline state remain unchanged.
 
 ## Security Boundaries
 
-- Admin credentials must come from `ADMIN_USERNAME` and `ADMIN_PASSWORD`.
+- Admin credentials default to `admin` / `admin` for an immediate FYP demo.
+  `ADMIN_USERNAME` and `ADMIN_PASSWORD` override those defaults.
 - Admin sessions use OS-random 192-bit identifiers.
 - Customer sessions also use OS randomness and a separate cookie.
 - Cookies are `HttpOnly`, `SameSite=Lax`, path `/`, and can be marked `Secure`

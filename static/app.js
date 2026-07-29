@@ -340,6 +340,207 @@ function setupCarouselControls() {
   });
 }
 
+/**
+ * Adds grab-and-drag scrolling for desktop mice and IDE phone previews.
+ *
+ * Physical phones already scroll overflow containers through native touch
+ * gestures. Preview tools commonly translate the same gesture into mouse
+ * pointer events, so this controller mirrors touch dragging without replacing
+ * native swipe behavior. A short movement threshold preserves ordinary clicks
+ * on dish buttons; only a real drag suppresses the following click.
+ */
+function setupDragScrolling() {
+  document
+    .querySelectorAll(
+      ".recommended-row, .order-filter-row, .admin-section-nav, .tool-tabs, .experiment-tabs, [data-drag-scroll]"
+    )
+    .forEach((scroller) => {
+      if (scroller.dataset.dragScrollBound === "true") return;
+      scroller.dataset.dragScrollBound = "true";
+
+      let pointerId = null;
+      let startX = 0;
+      let startY = 0;
+      let startScrollLeft = 0;
+      let dragging = false;
+      let suppressClick = false;
+      const dragThreshold = 6;
+
+      scroller.addEventListener("pointerdown", (event) => {
+        // Touch and pen input retain the browser's momentum scrolling. Mouse
+        // input includes Lirobi's simulated press-hold-pull interaction.
+        if (event.pointerType !== "mouse" || event.button !== 0) return;
+        pointerId = event.pointerId;
+        startX = event.clientX;
+        startY = event.clientY;
+        startScrollLeft = scroller.scrollLeft;
+        dragging = false;
+      });
+
+      scroller.addEventListener("pointermove", (event) => {
+        if (pointerId !== event.pointerId) return;
+        const distanceX = event.clientX - startX;
+        const distanceY = event.clientY - startY;
+        if (
+          !dragging &&
+          Math.max(Math.abs(distanceX), Math.abs(distanceY)) < dragThreshold
+        ) {
+          return;
+        }
+
+        if (!dragging) {
+          // Give predominantly vertical gestures to the page scroller. This
+          // lets users start an up/down pull directly over a carousel card.
+          if (Math.abs(distanceY) > Math.abs(distanceX)) {
+            pointerId = null;
+            return;
+          }
+          dragging = true;
+          scroller.classList.add("is-dragging");
+          scroller.setPointerCapture?.(event.pointerId);
+        }
+        event.preventDefault();
+        scroller.scrollLeft = startScrollLeft - distanceX;
+      });
+
+      const finishDrag = (event) => {
+        if (pointerId !== event.pointerId) return;
+        if (dragging) {
+          suppressClick = true;
+          window.setTimeout(() => {
+            suppressClick = false;
+          }, 0);
+        }
+        if (scroller.hasPointerCapture?.(event.pointerId)) {
+          scroller.releasePointerCapture(event.pointerId);
+        }
+        scroller.classList.remove("is-dragging");
+        pointerId = null;
+        dragging = false;
+      };
+
+      scroller.addEventListener("pointerup", finishDrag);
+      scroller.addEventListener("pointercancel", finishDrag);
+      scroller.addEventListener("lostpointercapture", (event) => {
+        if (pointerId === event.pointerId) {
+          scroller.classList.remove("is-dragging");
+          pointerId = null;
+          dragging = false;
+        }
+      });
+      scroller.addEventListener("dragstart", (event) => event.preventDefault());
+      scroller.addEventListener(
+        "click",
+        (event) => {
+          if (!suppressClick) return;
+          event.preventDefault();
+          event.stopPropagation();
+        },
+        true
+      );
+    });
+}
+
+/**
+ * Lets a mouse emulate a phone's press-hold-pull page gesture.
+ *
+ * Native touch scrolling remains under browser control. The mouse-only path is
+ * intended for device-preview tools such as Lirobi. Interactive controls are
+ * excluded so pressing buttons, links and form fields keeps normal behavior.
+ */
+function setupPageDragScrolling() {
+  let pointerId = null;
+  let startX = 0;
+  let startY = 0;
+  let startScrollY = 0;
+  let dragging = false;
+  let suppressClick = false;
+  let startedInHorizontalScroller = false;
+  const dragThreshold = 6;
+  const interactiveSelector =
+    "button, a, input, select, textarea, summary, label, [role='button']";
+
+  document.addEventListener("pointerdown", (event) => {
+    if (
+      event.pointerType !== "mouse" ||
+      event.button !== 0 ||
+      event.target.closest(interactiveSelector)
+    ) {
+      return;
+    }
+
+    pointerId = event.pointerId;
+    startX = event.clientX;
+    startY = event.clientY;
+    startScrollY = window.scrollY;
+    dragging = false;
+    startedInHorizontalScroller = Boolean(
+      event.target.closest(
+        ".recommended-row, .order-filter-row, .admin-section-nav, .tool-tabs, .experiment-tabs, [data-drag-scroll]"
+      )
+    );
+  });
+
+  document.addEventListener("pointermove", (event) => {
+    if (pointerId !== event.pointerId) return;
+    const distanceX = event.clientX - startX;
+    const distanceY = event.clientY - startY;
+
+    if (
+      !dragging &&
+      Math.max(Math.abs(distanceX), Math.abs(distanceY)) < dragThreshold
+    ) {
+      return;
+    }
+
+    if (!dragging) {
+      // A horizontal gesture that starts in a carousel belongs to that
+      // carousel. All predominantly vertical gestures move the page.
+      if (startedInHorizontalScroller && Math.abs(distanceX) >= Math.abs(distanceY)) {
+        pointerId = null;
+        return;
+      }
+      if (Math.abs(distanceY) <= Math.abs(distanceX)) {
+        pointerId = null;
+        return;
+      }
+      dragging = true;
+      document.body.classList.add("is-page-dragging");
+    }
+
+    event.preventDefault();
+    window.scrollTo({ top: startScrollY - distanceY, behavior: "auto" });
+  });
+
+  const finishPageDrag = (event) => {
+    if (pointerId !== event.pointerId) return;
+    if (dragging) {
+      suppressClick = true;
+      window.setTimeout(() => {
+        suppressClick = false;
+      }, 0);
+    }
+    document.body.classList.remove("is-page-dragging");
+    pointerId = null;
+    dragging = false;
+  };
+
+  document.addEventListener("pointerup", finishPageDrag);
+  document.addEventListener("pointercancel", finishPageDrag);
+  document.addEventListener("dragstart", (event) => {
+    if (pointerId !== null) event.preventDefault();
+  });
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (!suppressClick) return;
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    true
+  );
+}
+
 function setupOrderFilters() {
   document.querySelectorAll("[data-order-filter]").forEach((button) => {
     if (button.dataset.orderFilterBound === "true") return;
@@ -2681,6 +2882,8 @@ document.addEventListener("DOMContentLoaded", () => {
   updateCartCount();
   setupDishLocator();
   setupCarouselControls();
+  setupDragScrolling();
+  setupPageDragScrolling();
   setupOrderFilters();
   setupPreferencePanels();
   setupDiversitySelector();

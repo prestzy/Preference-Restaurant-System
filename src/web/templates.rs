@@ -66,7 +66,7 @@ pub fn customer_menu_page(view: &MenuView, session: &CustomerSession) -> String 
                     <button class="carousel-arrow" type="button" data-carousel-scroll="recommended-row" data-direction="1" aria-label="Scroll recommendations right">{chevron_right}</button>
                 </div>
             </div>
-            <div class="recommended-row" id="recommended-row">
+            <div class="recommended-row" id="recommended-row" data-drag-scroll aria-label="Recommended dishes. Swipe or drag horizontally to see more.">
                 {recommended_cards}
             </div>
             <div class="evaluation-strip" id="recommendation-stats"></div>
@@ -232,7 +232,7 @@ pub fn customer_start_page(
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Preston's Restaurant mobile ordering menu">
     <title>Start Order | Preston's Restaurant</title>
-    <link rel="stylesheet" href="/static/app.css?v=20260725-catppuccin-cart">
+    <link rel="stylesheet" href="/static/app.css?v=20260729-drag-scroll">
     <script src="/static/auth.js?v=20260724" defer></script>
 </head>
 <body>
@@ -317,7 +317,7 @@ fn profile_page_inner(
                     <button class="ghost-action" type="submit">End Session</button>
                 </form>
             </section>
-            <section class="order-filter-row" aria-label="Order status filters">
+            <section class="order-filter-row" data-drag-scroll aria-label="Order status filters. Swipe or drag horizontally to see more.">
                 <button class="chip active" type="button" data-order-filter="all">All</button>
                 <button class="chip" type="button" data-order-filter="pending">Pending</button>
                 <button class="chip" type="button" data-order-filter="preparing">Preparing</button>
@@ -496,7 +496,7 @@ pub fn admin_login_page(username: Option<&str>, message: Option<&str>) -> String
     <link rel="icon" href="data:,">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Login</title>
-    <link rel="stylesheet" href="/static/app.css?v=20260725-catppuccin-cart">
+    <link rel="stylesheet" href="/static/app.css?v=20260729-drag-scroll">
     <script src="/static/auth.js?v=20260724" defer></script>
 </head>
 <body>
@@ -546,15 +546,20 @@ fn page_shell(page: CustomerPageShell<'_>) -> String {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Preston's Restaurant menu, recommendations, cart, and order tracking">
     <title>{} | Preston's Restaurant</title>
-    <link rel="stylesheet" href="/static/app.css?v=20260725-catppuccin-cart">
+    <link rel="stylesheet" href="/static/app.css?v=20260729-drag-scroll">
     <script>
+        // Successful registration can render this menu directly so embedded
+        // mobile previews do not depend on a redirect-cookie round trip.
+        if (window.location.pathname === "/start") {{
+            window.history.replaceState(null, "", "/");
+        }}
         window.MENU_DISHES = {};
         window.RECOMMENDATIONS = {};
         window.PREFERENCE_OPTIONS = {};
         window.SEARCH_VOCABULARY = {};
         window.CUSTOMER_SESSION = {};
     </script>
-    <script src="/static/app.js?v=20260725-catppuccin-cart" defer></script>
+    <script src="/static/app.js?v=20260729-drag-scroll" defer></script>
 </head>
 <body>
     <main class="app-shell">
@@ -590,14 +595,14 @@ fn admin_page_shell(
     <link rel="icon" href="data:,">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{}</title>
-    <link rel="stylesheet" href="/static/app.css?v=20260725-catppuccin-cart">
+    <link rel="stylesheet" href="/static/app.css?v=20260729-drag-scroll">
     <script>
         window.MENU_DISHES = {};
         window.RECOMMENDATIONS = {};
         window.PREFERENCE_OPTIONS = {};
         window.SEARCH_VOCABULARY = {};
     </script>
-    <script src="/static/app.js?v=20260725-catppuccin-cart" defer></script>
+    <script src="/static/app.js?v=20260729-drag-scroll" defer></script>
 </head>
 <body class="admin-body">
     <main class="app-shell admin-shell">
@@ -678,7 +683,9 @@ fn admin_section_nav(active: &str) -> String {
         icon_svg("log-out")
     );
 
-    format!(r#"<nav class="admin-section-nav">{items}{logout}</nav>"#)
+    format!(
+        r#"<nav class="admin-section-nav" data-drag-scroll aria-label="Admin sections. Swipe or drag horizontally to see more.">{items}{logout}</nav>"#
+    )
 }
 
 fn preference_group(title: &str, help: &str, kind: &str, values: &[String]) -> String {
@@ -1239,7 +1246,7 @@ fn recommendation_tester(admin: &AdminView) -> String {
                         <option value="learning">Learning History</option>
                     </select>
                 </label>
-                <div class="tool-tabs" aria-label="Tools in selected category">
+                <div class="tool-tabs" data-drag-scroll aria-label="Tools in selected category. Swipe or drag horizontally to see more.">
                     <button type="button" data-tester-tool="adaptive" data-tool-category="production" data-tool-target="production-adaptive">Adaptive Scoring</button>
                     <button type="button" data-tester-tool="confidence" data-tool-category="production" data-tool-target="production-adaptive">Confidence Meter</button>
                     <button type="button" data-tester-tool="diversity" data-tool-category="production" data-tool-target="production-adaptive">Diversity</button>
@@ -1396,7 +1403,7 @@ fn recommendation_tester(admin: &AdminView) -> String {
                 </div>
                 <p class="muted">All simulations are temporary. They do not modify data/orders.csv or production recommendation weights.</p>
             </details>
-            <div class="experiment-tabs" role="tablist">
+            <div class="experiment-tabs" data-drag-scroll role="tablist" aria-label="Experiment type. Swipe or drag horizontally to see more.">
                 <button id="experiment-tab-ingredient" class="chip active" type="button" role="tab" data-experiment-tab="ingredient" aria-controls="experiment-panel-ingredient" aria-selected="true">Ingredient Impact</button>
                 <button id="experiment-tab-coorder" class="chip" type="button" role="tab" data-experiment-tab="coorder" aria-controls="experiment-panel-coorder" aria-selected="false">Co-Order Impact</button>
                 <button id="experiment-tab-method" class="chip" type="button" role="tab" data-experiment-tab="method" aria-controls="experiment-panel-method" aria-selected="false">Method Comparison</button>
@@ -1741,6 +1748,7 @@ mod tests {
         assert_eq!(html.matches("class=\"dish-card\"").count(), 3);
         assert!(html.contains("<span id=\"visible-count\">3</span> dish(es) available"));
         assert!(html.contains("id=\"dish-D01\""));
+        assert!(html.contains("id=\"recommended-row\" data-drag-scroll"));
         assert!(html.contains("id=\"clear-meal-choices\""));
         assert!(html.contains("id=\"clear-meal-result\""));
         assert!(html.contains("data-meal-context"));

@@ -356,6 +356,29 @@ textarea {
   display: none;
 }
 
+[data-drag-scroll] {
+  cursor: grab;
+}
+
+[data-drag-scroll].is-dragging {
+  cursor: grabbing;
+  scroll-behavior: auto;
+  scroll-snap-type: none;
+  user-select: none;
+}
+
+[data-drag-scroll].is-dragging * {
+  cursor: grabbing;
+  user-select: none;
+}
+
+body.is-page-dragging,
+body.is-page-dragging * {
+  cursor: grabbing;
+  scroll-behavior: auto;
+  user-select: none;
+}
+
 .chip {
   flex: 0 0 auto;
   min-width: 80px;
