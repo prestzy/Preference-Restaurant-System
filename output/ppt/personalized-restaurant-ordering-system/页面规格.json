@@ -1,0 +1,322 @@
+{
+  "deck": {
+    "title": "Personalized Restaurant Ordering System",
+    "material_state": "Complete FYP report, implementation, datasets, screenshots and test evidence",
+    "scene": "Final Year Project degree presentation and live demonstration",
+    "audience": "Two Final Year Project supervisors",
+    "page_count": 13,
+    "aspect_ratio": "16:9",
+    "style_direction": {
+      "density": "Low on the cover; medium-to-high on methods and evidence pages",
+      "tone": "Academic, credible, modern and restrained",
+      "palette": "Warm white, charcoal/navy, coral orange accent, restrained teal evidence accent",
+      "texture": "Clean matte presentation surface with real product UI and crisp information graphics",
+      "avoid": ["cropped text", "marketing poster", "empty slogan page", "card-heavy template", "glossy 3D", "decorative gradient blobs", "fabricated data"]
+    },
+    "style_lock": {
+      "confirmed_sample_pages": [1, 11],
+      "must_remain_consistent": ["modern sans-serif hierarchy", "warm-white and charcoal base", "coral-orange primary accent", "teal positive-evidence accent", "thin information lines", "small-radius annotations", "source-left and page-number-right footer", "wide calm margins"],
+      "can_vary_by_page": ["composition", "main visual position", "chart or flow type", "information density", "product screenshot proportion"],
+      "inheritance_note": "After sample confirmation, all pages inherit this evidence-led academic product-system language without becoming a repeated template."
+    },
+    "footer_rule": "Source or experiment boundary at bottom left; page number in 01 / 13 format at bottom right"
+  },
+  "slides": [
+    {
+      "page": 1,
+      "title": "Personalized Restaurant Ordering System",
+      "role": "Academic opening and project positioning",
+      "audience_question": "What is the project, who is it for, and what is its technical focus?",
+      "message": "A lightweight, explainable, mobile-first ordering prototype for small restaurants.",
+      "notes": "Introduce the QR-based customer journey and the three recommendation signals in under 40 seconds.",
+      "source_status": "User FYP report",
+      "content_relationship_brief": {
+        "audience_question": "What was built and why is the delivery model appropriate for a small restaurant?",
+        "one_sentence_conclusion": "A mobile-first Rust web prototype connects QR ordering with explainable personalized recommendations.",
+        "core_content_relation": "Project identity, customer usage context and recommendation scope",
+        "information_priority": ["project title", "lightweight explainable mobile-first proposition", "ingredient + co-order + hybrid scope", "author and supervisor"],
+        "evidence_and_source_responsibility": "The mobile menu visual proves the product form; the subtitle and mechanism line define the research boundary.",
+        "layout_freedom": "No fixed left-right template; the image model chooses a clear academic cover composition."
+      },
+      "visual_director_decision": {
+        "page_intent": "Make supervisors immediately understand that this is a working software-research prototype for phone-based restaurant ordering.",
+        "expression_strategy": "Use a real mobile ordering interface as product evidence and connect it visually to concise preference and co-order signals.",
+        "visual_metaphor": "A restrained signal-to-menu connection, not a decorative technology metaphor.",
+        "focus_decision": "Project title and the authentic phone menu experience share the visual focus.",
+        "aesthetic_risk_focus": ["restaurant marketing poster", "generic technology hero", "author details becoming illegible"],
+        "layout_boundary": "The image model controls composition; preserve generous margins and all locked text."
+      },
+      "graphic_language_hint": {
+        "suggested_graphic_language": "Product-system cover using an authentic mobile UI, minimal signal annotations and an academic title system",
+        "decision_source": "Project positioning and mobile QR use case",
+        "design_freedom": "Composition may be asymmetric or layered if hierarchy stays clear and credible."
+      },
+      "content_blocks": [
+        {"name": "Project identity", "function": "definition", "relationship_to_core": "names the work", "content": ["Personalized Restaurant Ordering System"], "visual": "dominant presentation title"},
+        {"name": "Positioning", "function": "explanation", "relationship_to_core": "states the value and scope", "content": ["Lightweight, explainable recommendations for small restaurants", "Mobile-first Rust web prototype"], "visual": "short subtitle and label"},
+        {"name": "Recommendation scope", "function": "mechanism", "relationship_to_core": "previews the research contribution", "content": ["Ingredient preferences", "Co-order patterns", "Hybrid scoring"], "visual": "three restrained signal labels"},
+        {"name": "Academic identity", "function": "source", "relationship_to_core": "establishes authorship", "content": ["YEAP CHAN LEONG", "22049837", "Supervisor: Professor Serge Demidenko", "Final Year Project · 2026"], "visual": "quiet footer identity"}
+      ],
+      "image_prompt_constraints": {
+        "must_keep": ["Personalized Restaurant Ordering System", "Lightweight, explainable recommendations for small restaurants", "Mobile-first Rust web prototype", "Ingredient preferences", "Co-order patterns", "Hybrid scoring", "YEAP CHAN LEONG", "22049837", "Supervisor: Professor Serge Demidenko", "Final Year Project · 2026"],
+        "hard_boundaries": ["single 16:9 slide", "English text fully readable", "do not invent data or citations", "not a multi-slide mockup"],
+        "quality": "A real academic FYP defense cover with product evidence, not a restaurant advertisement."
+      },
+      "background_image": "页面图片/第01页.png"
+    },
+    {
+      "page": 2,
+      "title": "Problem and Research Gap",
+      "role": "Problem framing",
+      "audience_question": "Why does a small restaurant need a different recommendation approach?",
+      "message": "Limited data, customer cold start, hard restrictions and weak transparency make conventional recommendation assumptions unsuitable.",
+      "source_status": "FYP report Sections 1.1–1.2; literature citations retained from report",
+      "content_relationship_brief": {"audience_question": "What practical and research gap is addressed?", "one_sentence_conclusion": "A single restaurant needs lightweight personalisation that works before rich behavioural data exists.", "core_content_relation": "Four constraints leading to one design response", "information_priority": ["limited historical data", "customer cold start", "hard dislike restrictions", "lack of transparency"], "evidence_and_source_responsibility": "Report-backed constraints motivate deterministic hybrid design without claiming commercial outcomes.", "layout_freedom": "Use an evidence-led problem structure rather than a fixed card grid."},
+      "visual_director_decision": {"page_intent": "Make the gap feel specific to a small restaurant, not a generic AI problem.", "expression_strategy": "Organise the four constraints around the missing capability and end with the required system response.", "visual_metaphor": "A sparse-evidence funnel may be used lightly.", "focus_decision": "The four constraints converging on the research gap.", "aesthetic_risk_focus": ["generic AI icons", "too much prose", "unsupported business claims"], "layout_boundary": "No fixed layout; preserve clear reading order."},
+      "graphic_language_hint": {"suggested_graphic_language": "Research-gap map with sparse-data cues and a concise design-response statement", "decision_source": "Problem statement", "design_freedom": "Use relationships, not repeated cards."},
+      "content_blocks": [
+        {"name": "Context", "function": "definition", "relationship_to_core": "sets operating condition", "content": ["Single restaurant", "Limited historical baskets", "No explicit ratings"], "visual": "small-restaurant evidence context"},
+        {"name": "Four challenges", "function": "evidence", "relationship_to_core": "defines the gap", "content": ["Limited historical data", "Customer cold start", "Preference and restriction handling", "Lack of transparency"], "visual": "connected constraint structure"},
+        {"name": "Design response", "function": "explanation", "relationship_to_core": "resolves the gap", "content": ["Lightweight", "Deterministic", "Explainable", "Mobile-first"], "visual": "single response statement"},
+        {"name": "Boundary", "function": "limitation", "relationship_to_core": "prevents overclaiming", "content": ["The study evaluates observable recommendation behaviour, not customer satisfaction or sales."], "visual": "quiet boundary note"}
+      ],
+      "image_prompt_constraints": {"must_keep": ["Problem and Research Gap", "Limited historical data", "Customer cold start", "Preference and restriction handling", "Lack of transparency", "Lightweight · Deterministic · Explainable · Mobile-first"], "hard_boundaries": ["single 16:9 slide", "English readable", "no fabricated statistics"], "quality": "Academic problem-framing page in the confirmed visual system."},
+      "background_image": "页面图片/第02页.png"
+    },
+    {
+      "page": 3,
+      "title": "Research Questions and Objectives",
+      "role": "Research alignment",
+      "audience_question": "What exactly is evaluated?",
+      "message": "Three observable questions align preference impact, co-order impact and method comparison with build, recommend and evaluate objectives.",
+      "source_status": "FYP report Sections 1.3–1.4",
+      "content_relationship_brief": {"audience_question": "How are the research questions connected to the objectives?", "one_sentence_conclusion": "Each RQ has a controlled evaluation path within a complete web artefact.", "core_content_relation": "RQ-to-objective alignment", "information_priority": ["RQ1 preference impact", "RQ2 co-order evidence", "RQ3 hidden-dish recovery", "RO1–RO6 grouped outcomes"], "evidence_and_source_responsibility": "Exact research scope comes from the report.", "layout_freedom": "Use an alignment structure, not a text-heavy list."},
+      "visual_director_decision": {"page_intent": "Give supervisors a compact mental model for the remainder of the presentation.", "expression_strategy": "Pair each RQ with its observable output and group objectives into Build, Recommend and Evaluate.", "visual_metaphor": "No metaphor; use research alignment.", "focus_decision": "Three RQ lanes with measurable outputs.", "aesthetic_risk_focus": ["long question text", "too many equal boxes", "losing evaluation measures"], "layout_boundary": "Keep exact meaning while shortening only for slide readability."},
+      "graphic_language_hint": {"suggested_graphic_language": "Research alignment matrix or three-lane logic map", "decision_source": "RQ and objective correspondence", "design_freedom": "Choose the clearest academic structure."},
+      "content_blocks": [
+        {"name": "RQ1", "function": "definition", "relationship_to_core": "preference experiment", "content": ["How do liked and disliked ingredients affect ranking and restriction compliance?", "Observe: rank movement + exclusions"], "visual": "RQ lane"},
+        {"name": "RQ2", "function": "definition", "relationship_to_core": "co-order experiment", "content": ["How does increasing co-order evidence affect association measures and ranking?", "Observe: support, confidence, lift + rank"], "visual": "RQ lane"},
+        {"name": "RQ3", "function": "definition", "relationship_to_core": "method comparison", "content": ["How do ingredient-only, co-order-only and hybrid methods recover a hidden dish?", "Observe: Hit@K + hidden rank"], "visual": "RQ lane"},
+        {"name": "Objectives", "function": "explanation", "relationship_to_core": "summarises RO1–RO6", "content": ["BUILD — mobile ordering artefact", "RECOMMEND — explainable hybrid engine", "EVALUATE — repeatable controlled experiments"], "visual": "three outcome labels"}
+      ],
+      "image_prompt_constraints": {"must_keep": ["Research Questions and Objectives", "RQ1", "RQ2", "RQ3", "BUILD", "RECOMMEND", "EVALUATE", "Hit@K"], "hard_boundaries": ["single 16:9 slide", "English readable", "preserve research meaning"], "quality": "Clear academic research alignment page."},
+      "background_image": "页面图片/第03页.png"
+    },
+    {
+      "page": 4,
+      "title": "Proposed System and User Journey",
+      "role": "End-to-end workflow",
+      "audience_question": "How does the recommendation system fit into a real ordering journey?",
+      "message": "Customer actions, staff processing and completed orders form a closed learning loop.",
+      "source_status": "FYP report scope and implemented workflows",
+      "content_relationship_brief": {"audience_question": "Who does what, and where does recommendation evidence enter?", "one_sentence_conclusion": "The web system turns QR access into an order and then converts completion into future behavioural evidence.", "core_content_relation": "Dual-role journey plus learning feedback loop", "information_priority": ["customer flow", "staff status flow", "completed-order feedback", "prototype boundaries"], "evidence_and_source_responsibility": "Flow reflects implemented customer/admin lifecycle.", "layout_freedom": "Use a journey or sequence, not fixed cards."},
+      "visual_director_decision": {"page_intent": "Show that recommendation is part of a complete system rather than an isolated algorithm.", "expression_strategy": "Trace customer and staff actions across one ordered path, with completion feeding historical evidence.", "visual_metaphor": "Closed-loop service journey.", "focus_decision": "QR-to-completed-order loop.", "aesthetic_risk_focus": ["too many arrows", "confusing customer/admin roles", "making persistence look like autonomous ML"], "layout_boundary": "Keep roles visually distinct and feedback explicit."},
+      "graphic_language_hint": {"suggested_graphic_language": "Dual-lane user journey with one feedback loop", "decision_source": "Ordering lifecycle", "design_freedom": "Use clear role markers and a mobile touchpoint."},
+      "content_blocks": [
+        {"name": "Customer", "function": "action", "relationship_to_core": "creates preferences and basket", "content": ["Scan QR / register", "Browse full menu", "Select preferences", "Review reasons", "Cart & checkout", "Track status"], "visual": "customer journey"},
+        {"name": "Staff", "function": "action", "relationship_to_core": "processes order", "content": ["Receive live order", "Pending → Preparing → Ready → Completed"], "visual": "staff lane"},
+        {"name": "Learning loop", "function": "explanation", "relationship_to_core": "updates behavioural evidence", "content": ["Completed basket → historical orders → popularity & co-order evidence"], "visual": "feedback loop"},
+        {"name": "Boundary", "function": "limitation", "relationship_to_core": "defines prototype", "content": ["Prototype checkout; no online payment processing"], "visual": "small note"}
+      ],
+      "image_prompt_constraints": {"must_keep": ["Proposed System and User Journey", "Scan QR", "Browse full menu", "Select preferences", "Cart & checkout", "Pending", "Preparing", "Ready", "Completed", "Historical orders"], "hard_boundaries": ["single 16:9 slide", "English readable", "feedback loop clear"], "quality": "Real software journey page in the confirmed visual system."},
+      "background_image": "页面图片/第04页.png"
+    },
+    {
+      "page": 5,
+      "title": "Lightweight Web Architecture",
+      "role": "System architecture",
+      "audience_question": "How is the system structured for low coupling and small operational cost?",
+      "message": "One Rust/Axum process separates browser presentation, application services, recommendation logic and local persistence.",
+      "source_status": "FYP report Section 3.4 and docs/ARCHITECTURE.md",
+      "content_relationship_brief": {"audience_question": "Which modules own which responsibilities?", "one_sentence_conclusion": "Clear boundaries keep HTTP, scoring, persistence and presentation independent within a lightweight deployment.", "core_content_relation": "Layered dependencies and responsibility boundaries", "information_priority": ["two browser roles", "Rust/Axum application", "focused services", "local data stores", "no external runtime recommender"], "evidence_and_source_responsibility": "Architecture mirrors repository modules.", "layout_freedom": "Use an architecture graph without forcing equal boxes."},
+      "visual_director_decision": {"page_intent": "Demonstrate engineering coherence and explain why the design is lightweight.", "expression_strategy": "Show request flow through layers while naming focused module responsibilities.", "visual_metaphor": "No metaphor; use system architecture.", "focus_decision": "Rust/Axum application as the orchestrating layer, not a monolith.", "aesthetic_risk_focus": ["unreadable module names", "generic cloud diagram", "implying distributed services"], "layout_boundary": "Keep dependency direction accurate."},
+      "graphic_language_hint": {"suggested_graphic_language": "Layered software architecture with module ownership labels", "decision_source": "Repository structure", "design_freedom": "Group modules by responsibility."},
+      "content_blocks": [
+        {"name": "Clients", "function": "definition", "relationship_to_core": "entry points", "content": ["Customer phone browser", "Staff / admin browser"], "visual": "browser endpoints"},
+        {"name": "Web application", "function": "mechanism", "relationship_to_core": "request coordination", "content": ["Rust + Axum + Tokio", "routes", "handlers", "sessions", "state", "server-rendered HTML + JavaScript + CSS"], "visual": "application layer"},
+        {"name": "Focused services", "function": "mechanism", "relationship_to_core": "high cohesion", "content": ["Search", "Recommendation", "Cart & orders", "Persistence"], "visual": "service modules"},
+        {"name": "Local data", "function": "source", "relationship_to_core": "lightweight persistence", "content": ["dishes.csv", "orders.csv", "order details", "learning events JSONL", "local dish images"], "visual": "data layer"},
+        {"name": "Runtime boundary", "function": "limitation", "relationship_to_core": "deployment scope", "content": ["No external ML service or image host at runtime"], "visual": "boundary label"}
+      ],
+      "image_prompt_constraints": {"must_keep": ["Lightweight Web Architecture", "Customer phone browser", "Staff / admin browser", "Rust + Axum + Tokio", "Search", "Recommendation", "Cart & orders", "Persistence", "CSV + JSONL + local images", "No external ML service at runtime"], "hard_boundaries": ["single 16:9 slide", "English readable", "architecture direction accurate"], "quality": "Senior software architecture slide, not cloud marketing art."},
+      "background_image": "页面图片/第05页.png"
+    },
+    {
+      "page": 6,
+      "title": "Recommendation Processing Pipeline",
+      "role": "Method pipeline",
+      "audience_question": "How is each recommendation produced?",
+      "message": "Hard exclusions protect restrictions first; eligible dishes are then scored, adaptively combined, reranked and explained.",
+      "source_status": "FYP report recommendation design and implementation",
+      "content_relationship_brief": {"audience_question": "What is the order of operations and why does it matter?", "one_sentence_conclusion": "Eligibility is separated from ranking so a popular dish can never override a disliked ingredient.", "core_content_relation": "Sequential data-processing pipeline", "information_priority": ["inputs", "hard exclusions", "component scores", "adaptive weights", "diversity", "explanations"], "evidence_and_source_responsibility": "Pipeline reflects deterministic implementation.", "layout_freedom": "Use a readable process flow, not a crowded formula sheet."},
+      "visual_director_decision": {"page_intent": "Make the algorithm understandable without code.", "expression_strategy": "Show transformations from customer/context inputs to ranked explainable output, highlighting the hard gate.", "visual_metaphor": "A guarded processing pipeline.", "focus_decision": "Hard exclusion before adaptive scoring.", "aesthetic_risk_focus": ["hard gate lost", "weights shown as fixed", "evidence confidence confused with score"], "layout_boundary": "Preserve operation order."},
+      "graphic_language_hint": {"suggested_graphic_language": "Data-analysis pipeline with a visually distinct hard eligibility gate", "decision_source": "Recommendation flow", "design_freedom": "Allow branch/merge where component signals combine."},
+      "content_blocks": [
+        {"name": "Inputs", "function": "variable", "relationship_to_core": "starts scoring", "content": ["Liked ingredients", "Disliked ingredients", "Preferred tags", "Selected dishes", "Time context"], "visual": "input signals"},
+        {"name": "Eligibility gate", "function": "restriction", "relationship_to_core": "protects constraints", "content": ["Exclude unavailable", "Exclude already selected", "Exclude any disliked ingredient"], "visual": "hard gate"},
+        {"name": "Component scores", "function": "mechanism", "relationship_to_core": "produces evidence", "content": ["Content", "Co-order", "Popularity", "Time"], "visual": "parallel score streams"},
+        {"name": "Combination", "function": "mechanism", "relationship_to_core": "adapts evidence", "content": ["Adaptive weights sum to 1.0", "Deterministic ranking", "Diversity reranking"], "visual": "merge and rerank"},
+        {"name": "Output", "function": "explanation", "relationship_to_core": "customer decision support", "content": ["Ranked dishes", "Component scores", "Plain-language reason", "Evidence confidence"], "visual": "output result"}
+      ],
+      "image_prompt_constraints": {"must_keep": ["Recommendation Processing Pipeline", "Hard exclusions first", "Content", "Co-order", "Popularity", "Time", "Adaptive weights", "Diversity reranking", "Explanation", "Evidence confidence"], "hard_boundaries": ["single 16:9 slide", "English readable", "hard exclusion before scoring"], "quality": "Clear method pipeline in the confirmed academic system."},
+      "background_image": "页面图片/第06页.png"
+    },
+    {
+      "page": 7,
+      "title": "Explainability and Evidence Confidence",
+      "role": "Evidence explanation",
+      "audience_question": "What does the user learn beyond the final rank?",
+      "message": "Every recommendation exposes the contributing signals, while evidence confidence describes support strength—not purchase probability.",
+      "source_status": "FYP report Sections 1.6, 3.4 and 5.3",
+      "content_relationship_brief": {"audience_question": "How are reasons generated and interpreted safely?", "one_sentence_conclusion": "Reasons are assembled from inspectable evidence rather than vague algorithm labels.", "core_content_relation": "Score, evidence and explanation responsibilities", "information_priority": ["example recommendation", "matched preference evidence", "co-order influence", "hard exclusion", "confidence boundary"], "evidence_and_source_responsibility": "Example wording must reflect real evidence types; confidence caveat prevents misinterpretation.", "layout_freedom": "Use one evidence-rich example with annotations."},
+      "visual_director_decision": {"page_intent": "Make explainability concrete and defensible.", "expression_strategy": "Deconstruct one recommendation reason into its evidence components and distinguish ranking score from confidence.", "visual_metaphor": "Evidence trace from signals to reason.", "focus_decision": "The plain-language reason and its traceable inputs.", "aesthetic_risk_focus": ["generic explainable AI claims", "tiny annotations", "confidence shown as probability"], "layout_boundary": "Keep the example readable at presentation distance."},
+      "graphic_language_hint": {"suggested_graphic_language": "Annotated evidence trace around one recommendation result", "decision_source": "Explanation-generation logic", "design_freedom": "Use a reason sentence as the anchor."},
+      "content_blocks": [
+        {"name": "Example reason", "function": "evidence", "relationship_to_core": "shows customer-facing output", "content": ["Recommended because it matches liked ingredients: chicken, chilli; matches preferred tag: spicy; and is often ordered with Nasi Lemak (D01)."], "visual": "prominent readable sentence"},
+        {"name": "Traceable inputs", "function": "explanation", "relationship_to_core": "grounds the reason", "content": ["Matched liked ingredients", "Matched preferred tags", "Co-order influence", "Component scores"], "visual": "evidence annotations"},
+        {"name": "Restriction", "function": "restriction", "relationship_to_core": "protects trust", "content": ["Disliked ingredients are excluded before ranking"], "visual": "hard-rule marker"},
+        {"name": "Confidence boundary", "function": "limitation", "relationship_to_core": "prevents overclaiming", "content": ["Evidence confidence = amount and quality of supporting evidence", "It is not the probability of purchase or liking"], "visual": "contrast statement"}
+      ],
+      "image_prompt_constraints": {"must_keep": ["Explainability and Evidence Confidence", "Matched liked ingredients", "Matched preferred tags", "Co-order influence", "Component scores", "Evidence confidence", "Not purchase probability"], "hard_boundaries": ["single 16:9 slide", "English readable", "do not invent scores"], "quality": "Evidence explanation page, not generic AI trust marketing."},
+      "background_image": "页面图片/第07页.png"
+    },
+    {
+      "page": 8,
+      "title": "Implemented System Outcomes",
+      "role": "Implemented artefact evidence",
+      "audience_question": "What can the working prototype actually do?",
+      "message": "The prototype connects customer ordering, explainable recommendations, staff operations and controlled evaluation in one web system.",
+      "source_status": "FYP report Chapter 4 and repository screenshots",
+      "content_relationship_brief": {"audience_question": "Which end-to-end capabilities are implemented?", "one_sentence_conclusion": "Both customer and administrator workflows are implemented and connected to the same recommendation and order state.", "core_content_relation": "Two-role capability map around one shared system", "information_priority": ["customer experience", "recommendation features", "staff operations", "evaluation tools"], "evidence_and_source_responsibility": "Real screenshots prove implementation; labels summarise scope.", "layout_freedom": "Use authentic interface evidence without creating a screenshot collage."},
+      "visual_director_decision": {"page_intent": "Demonstrate implementation breadth while remaining coherent.", "expression_strategy": "Use a small number of authentic interface views tied to four capability outcomes.", "visual_metaphor": "One system, two roles.", "focus_decision": "Connected customer mobile and admin workflow evidence.", "aesthetic_risk_focus": ["tiny screenshot collage", "feature checklist overload", "marketing claims"], "layout_boundary": "Prioritise readable interface crops and outcome labels."},
+      "graphic_language_hint": {"suggested_graphic_language": "Product evidence page with two-role interface views and concise capability anchors", "decision_source": "Implemented outcomes", "design_freedom": "Choose crops that remain readable."},
+      "content_blocks": [
+        {"name": "Customer", "function": "evidence", "relationship_to_core": "front-of-house outcome", "content": ["Responsive menu & dish search", "Preference selection", "Recommended for You + reasons", "Cart, checkout & order tracking"], "visual": "mobile UI evidence"},
+        {"name": "Administrator", "function": "evidence", "relationship_to_core": "staff outcome", "content": ["Live & historical orders", "Status updates", "Dish management", "Recommendation insights"], "visual": "admin UI evidence"},
+        {"name": "Evaluation", "function": "evidence", "relationship_to_core": "research outcome", "content": ["Ingredient-impact test", "Co-order simulation", "Method comparison", "Non-destructive experiments"], "visual": "tester evidence"},
+        {"name": "Scope", "function": "limitation", "relationship_to_core": "keeps claim accurate", "content": ["Single-restaurant local prototype"], "visual": "scope label"}
+      ],
+      "image_prompt_constraints": {"must_keep": ["Implemented System Outcomes", "CUSTOMER", "ADMINISTRATOR", "EVALUATION", "Responsive menu", "Preference selection", "Cart & checkout", "Live & historical orders", "Recommendation tester", "Single-restaurant local prototype"], "hard_boundaries": ["single 16:9 slide", "English readable", "use supplied screenshots as evidence"], "quality": "Working-system evidence page, not a generic feature list."},
+      "background_image": "页面图片/第08页.png"
+    },
+    {
+      "page": 9,
+      "title": "System Testing Results",
+      "role": "Engineering validation",
+      "audience_question": "Was the artefact tested across logic, workflow, security and responsive behaviour?",
+      "message": "All 115 Rust tests and all 55 selected report-level checks passed in the controlled local environment.",
+      "source_status": "SYSTEM_TESTING_RESULTS.md and FYP report Section 4.3",
+      "content_relationship_brief": {"audience_question": "What was tested and what does a 100% pass rate mean?", "one_sentence_conclusion": "The tested requirements passed, but this does not establish production readiness or user satisfaction.", "core_content_relation": "Quality gate, category breakdown and test boundary", "information_priority": ["115 passed", "55/55 passed", "category counts", "viewport evidence", "limitations"], "evidence_and_source_responsibility": "Exact counts are report evidence; boundary limits interpretation.", "layout_freedom": "Use a test evidence dashboard without commercial KPI styling."},
+      "visual_director_decision": {"page_intent": "Show broad verification and honest scope.", "expression_strategy": "Pair two headline test results with a category distribution and explicit environment boundary.", "visual_metaphor": "Quality gate.", "focus_decision": "115 passed and 55/55 passed as distinct measurements.", "aesthetic_risk_focus": ["combining 115 and 55", "100% implying production readiness", "dense table"], "layout_boundary": "Keep category counts exact."},
+      "graphic_language_hint": {"suggested_graphic_language": "Academic test summary with exact totals, compact breakdown and environment note", "decision_source": "System testing report", "design_freedom": "Use bars, check matrix or other precise form."},
+      "content_blocks": [
+        {"name": "Rust suite", "function": "evidence", "relationship_to_core": "implementation verification", "content": ["115 passed", "0 failed", "0 ignored"], "visual": "headline metric"},
+        {"name": "Report checks", "function": "evidence", "relationship_to_core": "requirements verification", "content": ["55 / 55 passed", "100%"], "visual": "headline metric"},
+        {"name": "Breakdown", "function": "evidence", "relationship_to_core": "shows coverage", "content": ["12 Unit & component", "8 Integration", "3 End-to-end", "8 Security", "24 Responsive"], "visual": "exact category distribution"},
+        {"name": "Responsive evidence", "function": "evidence", "relationship_to_core": "multi-viewport coverage", "content": ["390 × 844", "768 × 1024", "1440 × 900"], "visual": "viewport markers"},
+        {"name": "Boundary", "function": "limitation", "relationship_to_core": "prevents overclaiming", "content": ["Local single-server test", "Synthetic customer data", "No load test or formal external usability study"], "visual": "boundary note"}
+      ],
+      "image_prompt_constraints": {"must_keep": ["System Testing Results", "115 passed", "0 failed", "55 / 55 passed", "100%", "12 Unit & component", "8 Integration", "3 End-to-end", "8 Security", "24 Responsive", "390 × 844", "768 × 1024", "1440 × 900"], "hard_boundaries": ["single 16:9 slide", "English readable", "do not combine 115 with 55"], "quality": "Rigorous testing evidence page."},
+      "background_image": "页面图片/第09页.png"
+    },
+    {
+      "page": 10,
+      "title": "RQ1 & RQ2 — Observable Ranking Impact",
+      "role": "Controlled experiment results",
+      "audience_question": "Do explicit preferences and additional co-order evidence change recommendations as intended?",
+      "message": "Preferences changed eligibility and ranking immediately; stronger co-order evidence improved association strength and could move a candidate to rank 1.",
+      "source_status": "FYP report Sections 4.4.1–4.4.2 and evidence CSV files",
+      "content_relationship_brief": {"audience_question": "What observable before/after changes answer RQ1 and RQ2?", "one_sentence_conclusion": "Hard exclusions are absolute, liked signals raise compatible dishes, and behavioural evidence can strengthen complementary ranking.", "core_content_relation": "Before/after case evidence across two experiments", "information_priority": ["D14 10→1", "D30 1→excluded", "D07 7→1", "D09 remains 1 as association grows", "controlled-test boundary"], "evidence_and_source_responsibility": "Rank changes are exact evidence; interpretation stays within selected scenarios.", "layout_freedom": "Use a paired comparison without forcing symmetric card grids."},
+      "visual_director_decision": {"page_intent": "Make preference and co-order effects concrete through memorable dish cases.", "expression_strategy": "Use ranking trajectories and short evidence labels for RQ1 and RQ2.", "visual_metaphor": "Rank movement paths.", "focus_decision": "Three large before/after changes, with D09 as an important no-movement nuance.", "aesthetic_risk_focus": ["too many dish details", "excluded shown as rank zero", "claiming every stronger association changes rank"], "layout_boundary": "Keep case names, IDs and rank movements exact."},
+      "graphic_language_hint": {"suggested_graphic_language": "Paired rank-movement evidence with explicit hard-exclusion marker", "decision_source": "Controlled experiment results", "design_freedom": "Use slopes, arrows or rank strips."},
+      "content_blocks": [
+        {"name": "RQ1 liked", "function": "evidence", "relationship_to_core": "positive content signal", "content": ["Char Kway Teow (D14)", "Liked: bean sprouts", "Rank 10 → 1"], "visual": "upward rank trajectory"},
+        {"name": "RQ1 disliked", "function": "evidence", "relationship_to_core": "hard restriction", "content": ["Pisang Goreng (D30)", "Disliked: banana", "Rank 1 → Excluded"], "visual": "hard-exclusion path"},
+        {"name": "RQ1 combined", "function": "evidence", "relationship_to_core": "combined preference", "content": ["Ketupat (D05)", "Liked rice + disliked banana", "Rank 2 → 1"], "visual": "short rise"},
+        {"name": "RQ2 movement", "function": "evidence", "relationship_to_core": "co-order effect", "content": ["Nasi Lemak (D01) → Sambal Sotong (D07)", "+3 temporary co-orders", "Rank 7 → 1"], "visual": "large rise"},
+        {"name": "RQ2 nuance", "function": "explanation", "relationship_to_core": "qualifies rank movement", "content": ["Nasi Lemak (D01) → Chicken Satay (D09)", "Association strengthened; rank remained 1"], "visual": "stable rank with evidence growth"}
+      ],
+      "image_prompt_constraints": {"must_keep": ["RQ1 & RQ2 — Observable Ranking Impact", "Char Kway Teow (D14)", "Rank 10 → 1", "Pisang Goreng (D30)", "Rank 1 → Excluded", "Ketupat (D05)", "Rank 2 → 1", "Sambal Sotong (D07)", "+3 temporary co-orders", "Rank 7 → 1", "Chicken Satay (D09)", "rank remained 1"], "hard_boundaries": ["single 16:9 slide", "English readable", "exact rank changes"], "quality": "Controlled result comparison page."},
+      "background_image": "页面图片/第10页.png"
+    },
+    {
+      "page": 11,
+      "title": "RQ3 — Recommendation Method Comparison",
+      "role": "Core quantitative evidence page",
+      "audience_question": "Which recommendation method recovered the hidden dish most reliably in the controlled test?",
+      "message": "Co-order-only and fixed hybrid achieved 100% Hit@3 across five cases; ingredient-only achieved 20%.",
+      "notes": "Explain the Hit@3 comparison, average ranks, why the co-order signal was strong, and the limits of a five-case fixed-profile test.",
+      "source_status": "Calculated from user report evidence and method-comparison CSV",
+      "content_relationship_brief": {
+        "audience_question": "How do the three methods compare, and how far can the result be generalised?",
+        "one_sentence_conclusion": "Historical co-order evidence recovered all hidden dishes in Top 3 for this controlled sample, while the fixed ingredient profile recovered one.",
+        "core_content_relation": "Method comparison using Hit@3 and average hidden-dish rank, followed by interpretation and limitation",
+        "information_priority": ["Hit@3: 20% vs 100% vs 100%", "average rank: 14.20 vs 1.80 vs 1.80", "five-case evidence", "fixed-profile and small-sample limitation"],
+        "evidence_and_source_responsibility": "The chart carries the primary claim; average rank corroborates it; the experiment boundary prevents overclaiming.",
+        "layout_freedom": "Do not prescribe columns or cards; design a clear evidence-led academic result page."
+      },
+      "visual_director_decision": {
+        "page_intent": "Let supervisors compare methods in seconds, then immediately see why the conclusion is bounded.",
+        "expression_strategy": "Make the three-method quantitative contrast the visual focus, supported by a compact case-level evidence trace and a visible limitation note.",
+        "visual_metaphor": "No metaphor; use direct data structure.",
+        "focus_decision": "The 20% / 100% / 100% Hit@3 contrast is the dominant focal point.",
+        "aesthetic_risk_focus": ["tiny chart labels", "hiding the five-case limitation", "making hybrid appear statistically superior to co-order-only"],
+        "layout_boundary": "The image model controls chart composition; all labels, values and source text must remain readable."
+      },
+      "graphic_language_hint": {
+        "suggested_graphic_language": "Direct comparison chart with exact values, compact evidence strip and explicit experiment-boundary annotation",
+        "decision_source": "Three-method metric comparison with a tied top result",
+        "design_freedom": "Use bars, lollipops or another precise comparison form; preserve exact values and tie."
+      },
+      "content_blocks": [
+        {"name": "Hit@3 comparison", "function": "evidence", "relationship_to_core": "primary method comparison", "content": ["Ingredient-only — 20%", "Co-order-only — 100%", "Fixed hybrid (0.4 / 0.6) — 100%"], "visual": "large exact-value comparison chart"},
+        {"name": "Average hidden rank", "function": "evidence", "relationship_to_core": "corroborates Hit@3", "content": ["Ingredient-only — 14.20", "Co-order-only — 1.80", "Fixed hybrid — 1.80"], "visual": "compact secondary comparison"},
+        {"name": "Interpretation", "function": "explanation", "relationship_to_core": "explains the observed tie", "content": ["Strong historical co-order evidence dominated these five hidden-dish cases."], "visual": "short evidence explanation"},
+        {"name": "Experiment boundary", "function": "limitation", "relationship_to_core": "limits generalisation", "content": ["5 controlled cases", "Fixed liked preferences: rice + chicken", "Historical baseline retained", "No claim of statistical generalisation"], "visual": "clearly visible boundary note"},
+        {"name": "Source", "function": "source", "relationship_to_core": "makes evidence traceable", "content": ["Source: FYP report Section 4.4 · method-comparison evidence"], "visual": "footer citation"}
+      ],
+      "image_prompt_constraints": {
+        "must_keep": ["RQ3 — Recommendation Method Comparison", "20%", "100%", "100%", "Ingredient-only", "Co-order-only", "Fixed hybrid (0.4 / 0.6)", "Average hidden rank", "14.20", "1.80", "1.80", "5 controlled cases", "rice + chicken", "Historical baseline retained", "Source: FYP report Section 4.4 · method-comparison evidence"],
+        "hard_boundaries": ["single 16:9 slide", "English text fully readable", "exact numbers unchanged", "show co-order-only and fixed hybrid as tied", "do not imply statistical significance"],
+        "quality": "A rigorous academic evidence page that can be explained for 90 seconds."
+      },
+      "background_image": "页面图片/第11页.png"
+    },
+    {
+      "page": 12,
+      "title": "Contributions, Limitations and Future Work",
+      "role": "Balanced research assessment",
+      "audience_question": "What does the project contribute, and what remains unproven?",
+      "message": "The prototype establishes a lightweight, explainable system contribution; broader effectiveness requires real users, larger data and production infrastructure.",
+      "source_status": "FYP report Sections 1.5, 5.3–5.4",
+      "content_relationship_brief": {"audience_question": "How should the result be interpreted responsibly?", "one_sentence_conclusion": "Technical feasibility is demonstrated, but commercial and user outcomes are future research.", "core_content_relation": "Contribution, limitation and next-step progression", "information_priority": ["implemented contribution", "research contribution", "limitations", "future validation"], "evidence_and_source_responsibility": "Claims are bounded by the report's explicit exclusions.", "layout_freedom": "Use a progression or evidence boundary, not equal feature cards."},
+      "visual_director_decision": {"page_intent": "Show maturity by balancing achievement with limitations.", "expression_strategy": "Connect each limitation to a concrete future action while preserving the project's contribution.", "visual_metaphor": "Evidence boundary expanding through future validation.", "focus_decision": "Contribution at the centre, bounded by what is not yet proven.", "aesthetic_risk_focus": ["future-work wishlist", "minimising limitations", "claiming production readiness"], "layout_boundary": "Keep the distinction between achieved and future explicit."},
+      "graphic_language_hint": {"suggested_graphic_language": "Contribution-to-validation roadmap with explicit evidence boundary", "decision_source": "Conclusion and limitations", "design_freedom": "Use a mature academic progression."},
+      "content_blocks": [
+        {"name": "Contributions", "function": "evidence", "relationship_to_core": "what was achieved", "content": ["Mobile ordering + recommendation in one artefact", "Hard dislike constraints", "Adaptive explainable hybrid scoring", "Controlled non-destructive experiments"], "visual": "achieved core"},
+        {"name": "Limitations", "function": "limitation", "relationship_to_core": "evidence boundary", "content": ["Small historical dataset", "Single restaurant", "Controlled and synthetic evaluation", "No large-scale user study", "Confidence is not purchase probability"], "visual": "visible boundary"},
+        {"name": "Future work", "function": "action", "relationship_to_core": "next validation", "content": ["Real customer usability study", "Larger and longer-term order data", "Database-backed deployment", "Online evaluation / A-B testing", "Production security and load testing"], "visual": "forward path"}
+      ],
+      "image_prompt_constraints": {"must_keep": ["Contributions, Limitations and Future Work", "CONTRIBUTIONS", "LIMITATIONS", "FUTURE WORK", "Small historical dataset", "Single restaurant", "No large-scale user study", "Real customer usability study", "Database-backed deployment", "Confidence is not purchase probability"], "hard_boundaries": ["single 16:9 slide", "English readable", "no production-readiness claim"], "quality": "Balanced academic conclusion page."},
+      "background_image": "页面图片/第12页.png"
+    },
+    {
+      "page": 13,
+      "title": "Conclusion and Live Demo",
+      "role": "Final synthesis and demo handoff",
+      "audience_question": "What is the final takeaway and what will be demonstrated?",
+      "message": "The system integrates customer preferences, historical behaviour and transparent explanations into a working mobile ordering flow.",
+      "source_status": "User FYP report and implemented system",
+      "content_relationship_brief": {"audience_question": "What should supervisors remember before the demo?", "one_sentence_conclusion": "A lightweight Rust web system can deliver explainable personalisation under limited-data conditions.", "core_content_relation": "Three-part conclusion followed by four-step demo path", "information_priority": ["mobile-first artefact", "explainable hybrid recommendation", "completed-order learning", "demo sequence"], "evidence_and_source_responsibility": "Conclusion summarises demonstrated scope only.", "layout_freedom": "Create a confident handoff page, not a generic thank-you slide."},
+      "visual_director_decision": {"page_intent": "Leave one precise takeaway and direct attention to the live system.", "expression_strategy": "Compress the contribution into three proof points and make the demo path immediately actionable.", "visual_metaphor": "From preference to order to learning loop, used sparingly.", "focus_decision": "Final takeaway plus live-demo sequence.", "aesthetic_risk_focus": ["empty thank-you page", "too much recap", "demo steps too small"], "layout_boundary": "Keep the demo handoff readable from a distance."},
+      "graphic_language_hint": {"suggested_graphic_language": "Concise synthesis with a four-step live-demo path and authentic product cue", "decision_source": "Presentation conclusion", "design_freedom": "Use a strong ending composition within the confirmed system."},
+      "content_blocks": [
+        {"name": "Takeaway", "function": "conclusion", "relationship_to_core": "final claim", "content": ["Mobile-first ordering", "Explainable hybrid recommendations", "Completed orders strengthen future evidence"], "visual": "three concise proof points"},
+        {"name": "Demo path", "function": "action", "relationship_to_core": "live handoff", "content": ["1 · Customer entry & full menu", "2 · Preferences & recommendation reasons", "3 · Cart, checkout & status", "4 · Admin update, history & tester"], "visual": "four-step demo path"},
+        {"name": "Close", "function": "action", "relationship_to_core": "invites transition", "content": ["Live Demo", "Questions after demonstration"], "visual": "clear handoff label"}
+      ],
+      "image_prompt_constraints": {"must_keep": ["Conclusion and Live Demo", "Mobile-first ordering", "Explainable hybrid recommendations", "Completed orders strengthen future evidence", "1 · Customer entry & full menu", "2 · Preferences & recommendation reasons", "3 · Cart, checkout & status", "4 · Admin update, history & tester", "Live Demo", "13 / 13"], "hard_boundaries": ["single 16:9 slide", "English readable", "not a generic thank-you page"], "quality": "Confident academic conclusion and demo handoff."},
+      "background_image": "页面图片/第13页.png"
+    }
+  ]
+}

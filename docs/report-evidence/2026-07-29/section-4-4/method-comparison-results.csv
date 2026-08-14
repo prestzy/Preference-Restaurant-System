@@ -1,0 +1,6 @@
+case,order_id,context_dishes,hidden_dish_id,hidden_dish,ingredient_rank,coorder_rank,hybrid_rank,ingredient_hit_at_3,coorder_hit_at_3,hybrid_hit_at_3
+MC-01,O060,"D20,D05",D06,Kuih Seri Muka,4,1,1,0,1,1
+MC-02,O059,D18,D29,Gado-Gado,18,2,3,0,1,1
+MC-03,O058,"D22,D27",D30,Pisang Goreng,23,1,1,0,1,1
+MC-04,O057,"D21,D03",D05,Ketupat,1,2,1,1,1,1
+MC-05,O056,"D14,D27",D28,Rojak Buah,25,3,3,0,1,1

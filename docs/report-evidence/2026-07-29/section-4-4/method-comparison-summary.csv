@@ -1,0 +1,4 @@
+method,successful_hit_at_3_cases,total_cases,hit_at_3_rate_percent,average_hidden_dish_rank
+Ingredient-only,1,5,20,14.20
+Co-order-only,5,5,100,1.80
+Fixed hybrid 0.4/0.6,5,5,100,1.80

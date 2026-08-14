@@ -1,0 +1,14 @@
+Deck source artwork:
+C:\Users\user\Documents\Development_Project\Rust Project\fyp_recommender\output\ppt\personalized-restaurant-ordering-system\页面图片\第01页.png through 第13页.png
+
+Primary research source:
+C:\Users\user\Documents\Development_Project\Rust Project\fyp_recommender\FR_22049837.pdf
+
+Supporting implementation and evaluation evidence:
+C:\Users\user\Documents\Development_Project\Rust Project\fyp_recommender\docs\ARCHITECTURE.md
+C:\Users\user\Documents\Development_Project\Rust Project\fyp_recommender\docs\report-evidence\2026-07-29\SYSTEM_TESTING_RESULTS.md
+C:\Users\user\Documents\Development_Project\Rust Project\fyp_recommender\docs\report-evidence\2026-07-29\section-4-4\
+
+The PPTX uses the approved PNG pages as full-slide artwork. Visible content is
+therefore flattened to preserve exact visual fidelity. Presenter notes are
+native PowerPoint notes and contain per-slide source blocks.

@@ -1,0 +1,4 @@
+scenario,liked_ingredients,disliked_ingredients,dish_id,dish_name,baseline_rank,preference_rank,rank_change,outcome,excluded_dishes,restriction_violations
+IP-01,bean sprouts,,D14,Char Kway Teow,10,1,9,Moved upward,0,0
+IP-02,,banana,D30,Pisang Goreng,1,Excluded,N/A,Hard-excluded,1,0
+IP-03,rice,banana,D05,Ketupat,2,1,1,Moved upward while D30 was excluded,1,0
